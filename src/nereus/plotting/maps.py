@@ -39,7 +39,7 @@ def plot(
     extent: tuple[float, float, float, float] | None = None,
     resolution: float | tuple[int, int] = 1.0,
     interpolator: RegridInterpolator | None = None,
-    influence_radius: float = 500_000.0,
+    influence_radius: float = 80_000.0,
     cmap: str = "viridis",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -77,7 +77,7 @@ def plot(
     interpolator : RegridInterpolator, optional
         Pre-computed interpolator. If None, one will be created.
     influence_radius : float
-        Maximum influence radius in meters for interpolation.
+        Maximum influence radius in meters for interpolation. Default is 80 km.
     cmap : str
         Colormap name.
     vmin, vmax : float, optional
@@ -206,9 +206,9 @@ def plot(
     if gridlines:
         ax.gridlines(draw_labels=not is_polar_projection(projection), linewidth=0.5, alpha=0.5)
 
-    # Add colorbar
+    # Add colorbar (horizontal at bottom)
     if colorbar:
-        cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        cbar = fig.colorbar(im, ax=ax, orientation="horizontal", shrink=0.8, pad=0.05)
         if colorbar_label:
             cbar.set_label(colorbar_label)
         elif hasattr(data, "name") and data.name:
@@ -218,53 +218,3 @@ def plot(
         ax.set_title(title)
 
     return fig, ax, interpolator
-
-
-def plot_polar(
-    data: NDArray | "xr.DataArray",
-    lon: NDArray[np.floating],
-    lat: NDArray[np.floating],
-    *,
-    hemisphere: str = "north",
-    lat_limit: float = 50.0,
-    **kwargs: Any,
-) -> tuple["Figure", "Axes", RegridInterpolator]:
-    """Plot data on a polar stereographic projection.
-
-    Convenience function for polar plots with sensible defaults.
-
-    Parameters
-    ----------
-    data : array_like
-        1D array of data values.
-    lon : array_like
-        1D array of longitude coordinates.
-    lat : array_like
-        1D array of latitude coordinates.
-    hemisphere : {"north", "south"}
-        Which hemisphere to plot.
-    lat_limit : float
-        Latitude limit for the plot (equatorward boundary).
-    **kwargs
-        Additional arguments passed to plot().
-
-    Returns
-    -------
-    fig, ax, interpolator
-        Same as plot().
-    """
-    if hemisphere.lower() == "north":
-        projection = "npstere"
-        extent = (-180, 180, lat_limit, 90)
-    else:
-        projection = "spstere"
-        extent = (-180, 180, -90, -lat_limit)
-
-    return plot(
-        data,
-        lon,
-        lat,
-        projection=projection,
-        extent=extent,
-        **kwargs,
-    )

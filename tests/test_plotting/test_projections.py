@@ -34,11 +34,17 @@ class TestGetProjection:
 
     def test_north_polar(self):
         """Test North Polar Stereographic."""
+        proj = get_projection("np")
+        assert isinstance(proj, ccrs.NorthPolarStereo)
+
         proj = get_projection("npstere")
         assert isinstance(proj, ccrs.NorthPolarStereo)
 
     def test_south_polar(self):
         """Test South Polar Stereographic."""
+        proj = get_projection("sp")
+        assert isinstance(proj, ccrs.SouthPolarStereo)
+
         proj = get_projection("spstere")
         assert isinstance(proj, ccrs.SouthPolarStereo)
 
@@ -92,11 +98,13 @@ class TestIsPolarProjection:
 
     def test_north_polar(self):
         """Test North Polar detection."""
+        assert is_polar_projection("np") == "north"
         assert is_polar_projection("npstere") == "north"
         assert is_polar_projection(ccrs.NorthPolarStereo()) == "north"
 
     def test_south_polar(self):
         """Test South Polar detection."""
+        assert is_polar_projection("sp") == "south"
         assert is_polar_projection("spstere") == "south"
         assert is_polar_projection(ccrs.SouthPolarStereo()) == "south"
 

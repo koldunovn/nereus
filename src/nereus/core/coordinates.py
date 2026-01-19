@@ -210,3 +210,68 @@ def great_circle_path(
     lon, lat = cartesian_to_lonlat(x, y, z)
 
     return lon, lat
+
+
+def compute_element_centers(
+    lon: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    triangles: NDArray[np.integer],
+) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+    """Compute element center coordinates, handling cyclic triangles.
+
+    For triangular meshes, computes the center of each triangle. Handles
+    triangles that cross the dateline (±180°) by shifting longitudes
+    before averaging.
+
+    Parameters
+    ----------
+    lon : array_like
+        Longitude coordinates of mesh nodes in degrees.
+    lat : array_like
+        Latitude coordinates of mesh nodes in degrees.
+    triangles : array_like
+        Triangle connectivity array of shape (3, nelem) or (nelem, 3).
+        Contains indices into lon/lat arrays.
+
+    Returns
+    -------
+    lon_elem, lat_elem : tuple of ndarrays
+        Longitude and latitude of element centers.
+
+    Examples
+    --------
+    >>> lon_elem, lat_elem = compute_element_centers(mesh.lon, mesh.lat, mesh.face_nodes)
+    """
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    triangles = np.asarray(triangles)
+
+    # Ensure triangles has shape (nelem, 3)
+    if triangles.shape[0] == 3 and triangles.shape[1] != 3:
+        triangles = triangles.T
+
+    # Get vertex coordinates for each triangle
+    tri_lon = lon[triangles]  # (nelem, 3)
+    tri_lat = lat[triangles]  # (nelem, 3)
+
+    # Simple mean for latitude (no cyclic issues)
+    lat_elem = tri_lat.mean(axis=1)
+
+    # For longitude, need to handle triangles crossing the dateline
+    # First compute simple mean
+    lon_mean = tri_lon.mean(axis=1)
+
+    # Find cyclic triangles: where any vertex is far from the mean (>100°)
+    max_diff = np.abs(tri_lon - lon_mean[:, np.newaxis]).max(axis=1)
+    cyclic_mask = max_diff > 100
+
+    if np.any(cyclic_mask):
+        # For cyclic triangles, shift negative longitudes by +360 before averaging
+        cyclic_lon = tri_lon[cyclic_mask].copy()
+        cyclic_lon_shifted = np.where(cyclic_lon < 0, cyclic_lon + 360, cyclic_lon)
+        new_means = cyclic_lon_shifted.mean(axis=1)
+        # Shift back to [-180, 180] range
+        new_means = np.where(new_means > 180, new_means - 360, new_means)
+        lon_mean[cyclic_mask] = new_means
+
+    return lon_mean, lat_elem

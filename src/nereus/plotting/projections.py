@@ -24,6 +24,11 @@ PROJECTION_ALIASES: dict[str, dict[str, Any]] = {
     "moll": {"class": ccrs.Mollweide, "kwargs": {}, "global": True},
     "mollweide": {"class": ccrs.Mollweide, "kwargs": {}, "global": True},
     # North Polar Stereographic
+    "np": {
+        "class": ccrs.NorthPolarStereo,
+        "kwargs": {},
+        "polar": "north",
+    },
     "npstere": {
         "class": ccrs.NorthPolarStereo,
         "kwargs": {},
@@ -35,6 +40,11 @@ PROJECTION_ALIASES: dict[str, dict[str, Any]] = {
         "polar": "north",
     },
     # South Polar Stereographic
+    "sp": {
+        "class": ccrs.SouthPolarStereo,
+        "kwargs": {},
+        "polar": "south",
+    },
     "spstere": {
         "class": ccrs.SouthPolarStereo,
         "kwargs": {},

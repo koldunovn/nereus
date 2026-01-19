@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from nereus.plotting.maps import plot, plot_polar
+from nereus.plotting.maps import plot
 from nereus.regrid.interpolator import RegridInterpolator
 
 
@@ -157,33 +157,29 @@ class TestPlot:
         np.testing.assert_allclose(fig.get_size_inches(), [15, 8])
         plt.close(fig)
 
-
-class TestPlotPolar:
-    """Tests for plot_polar function."""
-
-    def test_north_polar(self, random_mesh_small, synthetic_data):
-        """Test north polar plot."""
+    def test_polar_projection_north(self, random_mesh_small, synthetic_data):
+        """Test north polar projection via plot()."""
         lon, lat = random_mesh_small
         data = synthetic_data
 
-        fig, ax, interp = plot_polar(
+        fig, ax, interp = plot(
             data, lon, lat,
-            hemisphere="north",
-            lat_limit=50,
+            projection="np",
+            extent=(-180, 180, 50, 90),
             resolution=5.0
         )
 
         plt.close(fig)
 
-    def test_south_polar(self, random_mesh_small, synthetic_data):
-        """Test south polar plot."""
+    def test_polar_projection_south(self, random_mesh_small, synthetic_data):
+        """Test south polar projection via plot()."""
         lon, lat = random_mesh_small
         data = synthetic_data
 
-        fig, ax, interp = plot_polar(
+        fig, ax, interp = plot(
             data, lon, lat,
-            hemisphere="south",
-            lat_limit=50,
+            projection="sp",
+            extent=(-180, 180, -90, -50),
             resolution=5.0
         )
 

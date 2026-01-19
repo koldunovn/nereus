@@ -26,7 +26,7 @@ from nereus._version import __version__
 from nereus.regrid import RegridInterpolator, regrid, set_cache_options
 
 # Plotting
-from nereus.plotting import plot, plot_polar, transect
+from nereus.plotting import plot, transect
 
 # Model-specific modules (as namespaces)
 from nereus.models import fesom, icono, icona, ifs, healpix
@@ -40,7 +40,6 @@ __all__ = [
     "set_cache_options",
     # Plotting
     "plot",
-    "plot_polar",
     "transect",
     # Model namespaces
     "fesom",

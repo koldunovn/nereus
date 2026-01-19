@@ -65,9 +65,10 @@ def transect(
     vmin, vmax : float, optional
         Color scale limits.
     depth_lim : tuple of float, optional
-        Depth limits (min, max). If None, uses data range.
+        Depth/height limits (min, max). If None, uses data range.
     invert_depth : bool
-        Whether to invert depth axis (surface at top).
+        Whether to invert vertical axis. Default True for ocean (0 at top,
+        depth increases downward). Set False for atmosphere (height increases upward).
     colorbar : bool
         Whether to add a colorbar.
     colorbar_label : str, optional
@@ -155,13 +156,17 @@ def transect(
 
     # Configure axes
     ax.set_xlabel("Distance (km)")
-    ax.set_ylabel("Depth (m)")
-
-    if invert_depth:
-        ax.invert_yaxis()
+    ax.set_ylabel("Depth (m)" if invert_depth else "Height (m)")
 
     if depth_lim:
-        ax.set_ylim(depth_lim)
+        if invert_depth:
+            # For ocean: 0 at top, max depth at bottom
+            ax.set_ylim(depth_lim[1], depth_lim[0])
+        else:
+            # For atmosphere: 0 at bottom, max height at top
+            ax.set_ylim(depth_lim)
+    elif invert_depth:
+        ax.invert_yaxis()
 
     if colorbar:
         cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)

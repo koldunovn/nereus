@@ -41,7 +41,7 @@ class RegridInterpolator:
         Interpolation method. Currently only "nearest" is supported.
     influence_radius : float
         Maximum influence radius in meters. Points beyond this distance
-        from any source point are masked. Default is 500 km.
+        from any source point are masked. Default is 80 km.
     lon_bounds : tuple of float
         Target grid longitude bounds. Default is (-180, 180).
     lat_bounds : tuple of float
@@ -72,7 +72,7 @@ class RegridInterpolator:
     source_lat: NDArray[np.floating]
     resolution: float | tuple[int, int] = 1.0
     method: Literal["nearest"] = "nearest"
-    influence_radius: float = 500_000.0
+    influence_radius: float = 80_000.0
     lon_bounds: tuple[float, float] = (-180.0, 180.0)
     lat_bounds: tuple[float, float] = (-90.0, 90.0)
 
@@ -203,7 +203,7 @@ def regrid(
     lat: NDArray[np.floating],
     resolution: float | tuple[int, int] = 1.0,
     method: Literal["nearest"] = "nearest",
-    influence_radius: float = 500_000.0,
+    influence_radius: float = 80_000.0,
     fill_value: float = np.nan,
     lon_bounds: tuple[float, float] = (-180.0, 180.0),
     lat_bounds: tuple[float, float] = (-90.0, 90.0),

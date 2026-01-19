@@ -1,0 +1,174 @@
+"""Vertical transect plotting for nereus.
+
+This module provides functions for plotting vertical transects (cross-sections)
+of 3D data along arbitrary paths.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy.typing import NDArray
+from scipy.spatial import cKDTree
+
+from nereus.core.coordinates import great_circle_path, lonlat_to_cartesian
+
+if TYPE_CHECKING:
+    import xarray as xr
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+
+def transect(
+    data: NDArray | "xr.DataArray",
+    lon: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    depth: NDArray[np.floating],
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    n_points: int = 100,
+    cmap: str = "viridis",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    depth_lim: tuple[float, float] | None = None,
+    invert_depth: bool = True,
+    colorbar: bool = True,
+    colorbar_label: str | None = None,
+    title: str | None = None,
+    figsize: tuple[float, float] | None = None,
+    ax: "Axes | None" = None,
+    **kwargs: Any,
+) -> tuple["Figure", "Axes"]:
+    """Plot vertical transect along a great circle path.
+
+    Parameters
+    ----------
+    data : array_like
+        2D array of data values with shape (nlevels, npoints).
+    lon : array_like
+        1D array of longitude coordinates.
+    lat : array_like
+        1D array of latitude coordinates.
+    depth : array_like
+        1D array of depth levels (positive downward).
+    start : tuple of float
+        Start point (lon, lat).
+    end : tuple of float
+        End point (lon, lat).
+    n_points : int
+        Number of points along the transect.
+    cmap : str
+        Colormap name.
+    vmin, vmax : float, optional
+        Color scale limits.
+    depth_lim : tuple of float, optional
+        Depth limits (min, max). If None, uses data range.
+    invert_depth : bool
+        Whether to invert depth axis (surface at top).
+    colorbar : bool
+        Whether to add a colorbar.
+    colorbar_label : str, optional
+        Label for the colorbar.
+    title : str, optional
+        Plot title.
+    figsize : tuple of float, optional
+        Figure size.
+    ax : Axes, optional
+        Existing axes to plot on.
+    **kwargs
+        Additional arguments passed to pcolormesh.
+
+    Returns
+    -------
+    fig : Figure
+        The matplotlib Figure.
+    ax : Axes
+        The matplotlib Axes.
+
+    Examples
+    --------
+    >>> fig, ax = nr.transect(
+    ...     temp, mesh.lon, mesh.lat, depth,
+    ...     start=(-30, 60), end=(30, 60)
+    ... )
+    """
+    # Handle xarray DataArray
+    if hasattr(data, "values"):
+        data = data.values
+    data = np.asarray(data)
+    lon_arr = np.asarray(lon).ravel()
+    lat_arr = np.asarray(lat).ravel()
+    depth_arr = np.asarray(depth).ravel()
+
+    # Generate transect path
+    path_lon, path_lat = great_circle_path(
+        start[0], start[1], end[0], end[1], n_points
+    )
+
+    # Build KDTree for source coordinates
+    source_xyz = np.column_stack(lonlat_to_cartesian(lon_arr, lat_arr))
+    tree = cKDTree(source_xyz)
+
+    # Find nearest points along path
+    path_xyz = np.column_stack(lonlat_to_cartesian(path_lon, path_lat))
+    _, indices = tree.query(path_xyz, k=1)
+
+    # Extract data along path
+    if data.ndim == 1:
+        # Single level
+        transect_data = data[indices].reshape(1, -1)
+    else:
+        # Multiple levels (nlevels, npoints)
+        transect_data = data[:, indices]
+
+    # Compute distance along path (approximate)
+    distance = np.zeros(n_points)
+    for i in range(1, n_points):
+        # Simple euclidean distance on path coordinates for display
+        dlat = path_lat[i] - path_lat[i - 1]
+        dlon = path_lon[i] - path_lon[i - 1]
+        # Approximate km
+        distance[i] = distance[i - 1] + np.sqrt(dlat**2 + (dlon * np.cos(np.deg2rad(path_lat[i])))**2) * 111
+
+    # Create figure if needed
+    if ax is None:
+        if figsize is None:
+            figsize = (12, 6)
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig = ax.get_figure()
+
+    # Plot
+    im = ax.pcolormesh(
+        distance,
+        depth_arr,
+        transect_data,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        shading="auto",
+        **kwargs,
+    )
+
+    # Configure axes
+    ax.set_xlabel("Distance (km)")
+    ax.set_ylabel("Depth (m)")
+
+    if invert_depth:
+        ax.invert_yaxis()
+
+    if depth_lim:
+        ax.set_ylim(depth_lim)
+
+    if colorbar:
+        cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        if colorbar_label:
+            cbar.set_label(colorbar_label)
+
+    if title:
+        ax.set_title(title)
+
+    return fig, ax

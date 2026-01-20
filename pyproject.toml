@@ -38,15 +38,27 @@ dependencies = [
 [project.optional-dependencies]
 dask = ["dask[array]>=2022.6"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1", "mypy>=1.0"]
-all = ["nereus[dask,dev]"]
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=2.0",
+    "sphinx-copybutton>=0.5",
+    "myst-parser>=2.0",
+    "nbsphinx>=0.9",
+    "ipython>=8.0",
+]
+all = ["nereus[dask,dev,docs]"]
 
 [project.urls]
 Homepage = "https://github.com/koldunovn/nereus"
-Documentation = "https://github.com/koldunovn/nereus"
+Documentation = "https://nereus.readthedocs.io"
 Repository = "https://github.com/koldunovn/nereus"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nereus"]
+artifacts = ["src/nereus/diag/data/*.geojson"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/nereus", "src/nereus/diag/data/*.geojson"]
 
 [tool.ruff]
 line-length = 100

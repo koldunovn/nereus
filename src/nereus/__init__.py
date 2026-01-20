@@ -38,11 +38,14 @@ from nereus.plotting import plot, transect
 
 # Diagnostics (exported at top level)
 from nereus.diag import (
+    get_region_mask,
     heat_content,
     hovmoller,
     ice_area,
     ice_extent,
     ice_volume,
+    list_available_regions,
+    load_geojson,
     plot_hovmoller,
     volume_mean,
 )
@@ -68,6 +71,10 @@ __all__ = [
     "heat_content",
     "hovmoller",
     "plot_hovmoller",
+    # Region masks
+    "get_region_mask",
+    "list_available_regions",
+    "load_geojson",
     # Model namespaces
     "fesom",
     "icono",

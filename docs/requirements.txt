@@ -1,0 +1,23 @@
+# Documentation build requirements for Nereus
+# Install with: pip install -r docs/requirements.txt
+
+# Sphinx and extensions
+sphinx>=7.0
+sphinx-rtd-theme>=2.0
+sphinx-copybutton>=0.5
+myst-parser>=2.0
+nbsphinx>=0.9
+
+# For notebook support
+ipython>=8.0
+jupyter
+
+# For API documentation (mock imports)
+# These are needed so autodoc can import the package
+numpy>=1.22
+scipy>=1.9
+xarray>=2022.6
+netCDF4>=1.6
+matplotlib>=3.5
+cartopy>=0.21
+dask>=2022.6

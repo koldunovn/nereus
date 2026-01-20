@@ -9,22 +9,7 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
-Added
-~~~~~
-
-- Initial public release
-- Core regridding functionality with KD-tree nearest neighbor interpolation
-- Map plotting with Cartopy projections (PlateCarree, Robinson, Mercator, Mollweide, Polar Stereographic, Orthographic, Lambert Conformal)
-- Vertical transect plotting
-- Sea ice diagnostics: ``ice_area``, ``ice_volume``, ``ice_extent``
-- Ocean diagnostics: ``volume_mean``, ``heat_content``
-- Hovmoller diagram computation and plotting
-- FESOM2 mesh support with ``load_mesh`` and ``open_dataset``
-- Interpolator caching with LRU eviction
-- Dask array support for lazy computation
-- Comprehensive documentation with Sphinx
-
-[0.1.0] - 2024-XX-XX
+[0.2.0] - 2026-01-20
 --------------------
 
 Initial release.
@@ -73,6 +58,11 @@ Added
 - ``fesom.open_dataset``: Open FESOM2 data with mesh coordinates
 - Stub modules for ICON-Ocean, ICON-Atmosphere, IFS, HEALPix
 
+[0.1.0] - 2024-01-19
+--------------------
+
+Initial release.
+
 Migration Guide
 ---------------
 
@@ -94,17 +84,3 @@ Nereus provides similar functionality with a cleaner API:
    import nereus as nr
    mesh = nr.fesom.load_mesh("/path/to/mesh")
    nr.plot(data, mesh.lon, mesh.lat)
-
-**From xESMF**
-
-Nereus is designed for quick exploration; use xESMF for production regridding:
-
-.. code-block:: python
-
-   # For exploration: Nereus
-   regridded, _ = nr.regrid(data, lon, lat, resolution=0.5)
-
-   # For production: xESMF
-   import xesmf as xe
-   regridder = xe.Regridder(ds_in, ds_out, "bilinear")
-   regridded = regridder(data)

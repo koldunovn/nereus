@@ -7,6 +7,7 @@ This module provides functions for computing vertically-integrated ocean metrics
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -39,7 +40,11 @@ def volume_mean(
         the last two axes being (nlevels, npoints). For time series,
         shape would be (ntime, nlevels, npoints).
     area : array_like
-        Grid cell areas in m^2, shape (npoints,).
+        Grid cell areas in m^2. Can be either:
+        - 1D array of shape (npoints,) for surface area (uniform across depth)
+        - 2D array of shape (nlevels, npoints) for depth-dependent area
+        If 2D and has one extra level compared to data layers, the extra
+        level is dropped with a warning (levels vs layers).
     thickness : array_like
         Layer thicknesses in meters, shape (nlevels, npoints) or (nlevels,)
         if uniform across points.
@@ -74,17 +79,51 @@ def volume_mean(
     if hasattr(data, "values"):
         data = data.values
     data_arr = np.asarray(data)
-    area_arr = np.asarray(area).ravel()
+    area_arr = np.asarray(area)
     thick_arr = np.asarray(thickness)
+
+    # Get number of levels from data
+    nlev_data = data_arr.shape[-2]
+
+    # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
+    if area_arr.ndim == 1:
+        # Surface area only - will broadcast later
+        npoints = area_arr.shape[0]
+        area_is_2d = False
+    elif area_arr.ndim == 2:
+        nlev_area, npoints = area_arr.shape
+        area_is_2d = True
+        # Check if area has one extra level (levels vs layers mismatch)
+        if nlev_area != nlev_data:
+            diff = nlev_area - nlev_data
+            if diff != 1:
+                raise ValueError(
+                    f"area has {nlev_area} vertical levels but data has {nlev_data}; "
+                    "only area having one extra level is supported (levels vs layers)."
+                )
+            warnings.warn(
+                f"area has one more vertical level than data; "
+                f"using the first {nlev_data} levels of area to match data "
+                "(levels vs layers).",
+                UserWarning,
+                stacklevel=2,
+            )
+            area_arr = area_arr[:nlev_data, :]
+    else:
+        raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
 
     # Ensure thickness is 2D (nlevels, npoints)
     if thick_arr.ndim == 1:
-        # Broadcast to (nlevels, npoints)
         nlevels = thick_arr.shape[0]
-        npoints = area_arr.shape[0]
         thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+    else:
+        nlevels = thick_arr.shape[0]
 
-    nlevels, npoints = thick_arr.shape
+    # Validate dimensions
+    if nlevels != nlev_data:
+        raise ValueError(
+            f"thickness has {nlevels} levels but data has {nlev_data}"
+        )
 
     # Build depth mask if needed
     level_mask = np.ones(nlevels, dtype=bool)
@@ -99,15 +138,20 @@ def volume_mean(
 
     # Build horizontal mask
     if mask is not None:
-        mask = np.asarray(mask).ravel()
+        horiz_mask = np.asarray(mask).ravel()
     else:
-        mask = np.ones(npoints, dtype=bool)
+        horiz_mask = np.ones(npoints, dtype=bool)
 
     # Compute cell volumes: thickness * area
-    volumes = thick_arr * area_arr  # (nlevels, npoints)
+    if area_is_2d:
+        # Area is (nlevels, npoints)
+        volumes = thick_arr * area_arr
+    else:
+        # Area is (npoints,), broadcast to (nlevels, npoints)
+        volumes = thick_arr * area_arr[np.newaxis, :]
 
     # Apply masks
-    volumes = volumes * level_mask[:, np.newaxis] * mask[np.newaxis, :]
+    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask[np.newaxis, :]
 
     # Handle NaN in data - set volume to 0 where data is NaN
     # For ND data, we need to handle this per timestep
@@ -166,7 +210,11 @@ def heat_content(
         Temperature in degrees Celsius, shape (nlevels, npoints) or higher
         dimensional with the last two axes being (nlevels, npoints).
     area : array_like
-        Grid cell areas in m^2, shape (npoints,).
+        Grid cell areas in m^2. Can be either:
+        - 1D array of shape (npoints,) for surface area (uniform across depth)
+        - 2D array of shape (nlevels, npoints) for depth-dependent area
+        If 2D and has one extra level compared to data layers, the extra
+        level is dropped with a warning (levels vs layers).
     thickness : array_like
         Layer thicknesses in meters, shape (nlevels, npoints) or (nlevels,).
     depth : array_like, optional
@@ -205,16 +253,51 @@ def heat_content(
     if hasattr(temperature, "values"):
         temperature = temperature.values
     temp_arr = np.asarray(temperature)
-    area_arr = np.asarray(area).ravel()
+    area_arr = np.asarray(area)
     thick_arr = np.asarray(thickness)
+
+    # Get number of levels from data
+    nlev_data = temp_arr.shape[-2]
+
+    # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
+    if area_arr.ndim == 1:
+        # Surface area only - will broadcast later
+        npoints = area_arr.shape[0]
+        area_is_2d = False
+    elif area_arr.ndim == 2:
+        nlev_area, npoints = area_arr.shape
+        area_is_2d = True
+        # Check if area has one extra level (levels vs layers mismatch)
+        if nlev_area != nlev_data:
+            diff = nlev_area - nlev_data
+            if diff != 1:
+                raise ValueError(
+                    f"area has {nlev_area} vertical levels but data has {nlev_data}; "
+                    "only area having one extra level is supported (levels vs layers)."
+                )
+            warnings.warn(
+                f"area has one more vertical level than data; "
+                f"using the first {nlev_data} levels of area to match data "
+                "(levels vs layers).",
+                UserWarning,
+                stacklevel=2,
+            )
+            area_arr = area_arr[:nlev_data, :]
+    else:
+        raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
 
     # Ensure thickness is 2D (nlevels, npoints)
     if thick_arr.ndim == 1:
         nlevels = thick_arr.shape[0]
-        npoints = area_arr.shape[0]
         thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+    else:
+        nlevels = thick_arr.shape[0]
 
-    nlevels, npoints = thick_arr.shape
+    # Validate dimensions
+    if nlevels != nlev_data:
+        raise ValueError(
+            f"thickness has {nlevels} levels but data has {nlev_data}"
+        )
 
     # Build depth mask if needed
     level_mask = np.ones(nlevels, dtype=bool)
@@ -229,15 +312,20 @@ def heat_content(
 
     # Build horizontal mask
     if mask is not None:
-        mask = np.asarray(mask).ravel()
+        horiz_mask = np.asarray(mask).ravel()
     else:
-        mask = np.ones(npoints, dtype=bool)
+        horiz_mask = np.ones(npoints, dtype=bool)
 
     # Compute cell volumes: thickness * area
-    volumes = thick_arr * area_arr  # (nlevels, npoints)
+    if area_is_2d:
+        # Area is (nlevels, npoints)
+        volumes = thick_arr * area_arr
+    else:
+        # Area is (npoints,), broadcast to (nlevels, npoints)
+        volumes = thick_arr * area_arr[np.newaxis, :]
 
     # Apply masks
-    volumes = volumes * level_mask[:, np.newaxis] * mask[np.newaxis, :]
+    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask[np.newaxis, :]
 
     # Compute heat content: rho * cp * sum((T - T_ref) * volume)
     temp_anomaly = temp_arr - reference_temp

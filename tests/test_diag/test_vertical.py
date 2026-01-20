@@ -134,6 +134,58 @@ class TestVolumeMean:
         with pytest.raises(ValueError, match="depth array required"):
             volume_mean(data, area, thickness, depth_max=100.0)
 
+    def test_volume_mean_2d_area(self):
+        """Test volume mean with 2D depth-dependent area."""
+        data = np.array([
+            [10.0, 20.0],  # Level 0
+            [30.0, 40.0],  # Level 1
+        ])
+        # Area varies with depth (e.g., unstructured mesh)
+        area = np.array([
+            [1e6, 2e6],  # Level 0 areas
+            [0.5e6, 1e6],  # Level 1 areas (smaller at depth)
+        ])
+        thickness = np.array([10.0, 10.0])
+
+        result = volume_mean(data, area, thickness)
+
+        # Volumes: 10*1e6, 10*2e6, 10*0.5e6, 10*1e6 = 10e6, 20e6, 5e6, 10e6
+        # Total: 45e6
+        # Weighted sum: 10*10e6 + 20*20e6 + 30*5e6 + 40*10e6 = 100e6 + 400e6 + 150e6 + 400e6 = 1050e6
+        # Mean: 1050e6 / 45e6 = 23.333...
+        expected = 1050 / 45
+        assert result == pytest.approx(expected)
+
+    def test_volume_mean_2d_area_extra_level(self):
+        """Test volume mean with 2D area having one extra level (levels vs layers)."""
+        import warnings
+
+        data = np.array([
+            [10.0, 20.0],  # Layer 0
+            [30.0, 40.0],  # Layer 1
+        ])
+        # Area has 3 levels but data has 2 layers
+        area = np.array([
+            [1e6, 2e6],  # Level 0
+            [1e6, 2e6],  # Level 1
+            [0.5e6, 1e6],  # Level 2 (should be ignored)
+        ])
+        thickness = np.array([10.0, 10.0])
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = volume_mean(data, area, thickness)
+            assert len(w) == 1
+            assert "one more vertical level" in str(w[0].message)
+
+        # Should use only first 2 levels of area
+        # Volumes: 10*1e6, 10*2e6, 10*1e6, 10*2e6
+        # Total: 60e6
+        # Weighted sum: 10*10e6 + 20*20e6 + 30*10e6 + 40*20e6 = 1600e6
+        # Mean: 1600e6 / 60e6 = 26.666...
+        expected = 1600 / 60
+        assert result == pytest.approx(expected)
+
 
 class TestHeatContent:
     """Tests for heat_content function."""
@@ -253,4 +305,23 @@ class TestHeatContent:
 
         # NaN excluded, 3 valid cells with volume 1e8 each
         expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 3e8
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_heat_content_2d_area(self):
+        """Test heat content with 2D depth-dependent area."""
+        temperature = np.array([
+            [10.0, 10.0],  # Level 0
+            [10.0, 10.0],  # Level 1
+        ])
+        # Area varies with depth
+        area = np.array([
+            [1e6, 2e6],  # Level 0 areas
+            [0.5e6, 1e6],  # Level 1 areas (smaller at depth)
+        ])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness)
+
+        # Volumes: 100*1e6 + 100*2e6 + 100*0.5e6 + 100*1e6 = 4.5e8 m^3
+        expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 4.5e8
         assert result == pytest.approx(expected, rel=1e-6)

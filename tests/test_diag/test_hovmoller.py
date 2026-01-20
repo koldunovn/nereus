@@ -184,6 +184,74 @@ class TestHovmoller:
         assert time_out.shape == (1,)
         assert result.shape == (1, 2)
 
+    def test_hovmoller_depth_mode_2d_area(self):
+        """Test Hovmoller with 2D depth-dependent area."""
+        # 2 times, 2 levels, 2 points
+        data = np.array([
+            [[10.0, 30.0], [20.0, 40.0]],  # t=0
+            [[11.0, 31.0], [21.0, 41.0]],  # t=1
+        ])
+        # Area varies with depth
+        area = np.array([
+            [3e6, 1e6],  # Level 0: first point 3x larger
+            [1e6, 3e6],  # Level 1: second point 3x larger
+        ])
+        depth = np.array([50.0, 150.0])
+
+        _, _, result = hovmoller(data, area, depth=depth, mode="depth")
+
+        # Level 0: (10*3 + 30*1) / 4 = 15
+        # Level 1: (20*1 + 40*3) / 4 = 35
+        assert result[0, 0] == pytest.approx(15.0)
+        assert result[0, 1] == pytest.approx(35.0)
+        # Level 0: (11*3 + 31*1) / 4 = 16
+        # Level 1: (21*1 + 41*3) / 4 = 36
+        assert result[1, 0] == pytest.approx(16.0)
+        assert result[1, 1] == pytest.approx(36.0)
+
+    def test_hovmoller_depth_mode_2d_area_extra_level(self):
+        """Test Hovmoller with 2D area having one extra level."""
+        import warnings
+
+        data = np.array([
+            [[10.0, 30.0], [20.0, 40.0]],
+        ])
+        # Area has 3 levels but data has 2 layers
+        area = np.array([
+            [3e6, 1e6],  # Level 0
+            [1e6, 3e6],  # Level 1
+            [1e6, 1e6],  # Level 2 (should be ignored)
+        ])
+        depth = np.array([50.0, 150.0])
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _, _, result = hovmoller(data, area, depth=depth, mode="depth")
+            assert len(w) == 1
+            assert "one more vertical level" in str(w[0].message)
+
+        # Should use only first 2 levels of area
+        assert result[0, 0] == pytest.approx(15.0)
+        assert result[0, 1] == pytest.approx(35.0)
+
+    def test_hovmoller_latitude_mode_2d_area(self):
+        """Test latitude Hovmoller with 2D area (uses surface level)."""
+        lats = np.array([-60, 60])
+        data = np.array([
+            [10.0, 20.0],
+            [30.0, 40.0],
+        ])
+        # 2D area - should use first level for latitude mode
+        area = np.array([
+            [3e6, 1e6],  # Level 0 (surface) - will be used
+            [1e6, 1e6],  # Level 1 - ignored
+        ])
+
+        time_out, _, result = hovmoller(data, area, lat=lats, mode="latitude")
+
+        assert time_out.shape == (2,)
+        # The result depends on which latitude bins the points fall into
+
 
 class TestPlotHovmoller:
     """Tests for plot_hovmoller function."""

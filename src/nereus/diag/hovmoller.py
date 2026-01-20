@@ -6,6 +6,7 @@ This module provides functions for computing and plotting Hovmoller diagrams
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any, Literal
 
 import matplotlib.pyplot as plt
@@ -40,7 +41,11 @@ def hovmoller(
         Data array. For depth mode: shape (ntime, nlevels, npoints).
         For latitude mode: shape (ntime, npoints) or (ntime, nlevels, npoints).
     area : array_like
-        Grid cell areas in m^2, shape (npoints,).
+        Grid cell areas in m^2. Can be either:
+        - 1D array of shape (npoints,) for surface area (uniform across depth)
+        - 2D array of shape (nlevels, npoints) for depth-dependent area
+        If 2D and has one extra level compared to data layers, the extra
+        level is dropped with a warning (levels vs layers).
     time : array_like, optional
         Time coordinates. If None, uses integer indices.
     depth : array_like, optional
@@ -75,13 +80,13 @@ def hovmoller(
     if hasattr(data, "values"):
         data = data.values
     data_arr = np.asarray(data)
-    area_arr = np.asarray(area).ravel()
-    npoints = area_arr.shape[0]
+    area_arr = np.asarray(area)
 
-    # Apply mask
+    # Apply mask to horizontal points
     if mask is not None:
-        mask = np.asarray(mask).ravel()
-        area_arr = np.where(mask, area_arr, 0.0)
+        horiz_mask = np.asarray(mask).ravel()
+    else:
+        horiz_mask = None
 
     if mode == "depth":
         if depth is None:
@@ -93,7 +98,44 @@ def hovmoller(
             # Assume (nlevels, npoints) - single timestep
             data_arr = data_arr[np.newaxis, :, :]
 
-        ntime, nlevels, _ = data_arr.shape
+        ntime, nlevels, npoints = data_arr.shape
+
+        # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
+        if area_arr.ndim == 1:
+            area_arr = area_arr.ravel()
+            if area_arr.shape[0] != npoints:
+                raise ValueError(
+                    f"area has {area_arr.shape[0]} points but data has {npoints}"
+                )
+            area_is_2d = False
+        elif area_arr.ndim == 2:
+            nlev_area = area_arr.shape[0]
+            area_is_2d = True
+            # Check if area has one extra level (levels vs layers mismatch)
+            if nlev_area != nlevels:
+                diff = nlev_area - nlevels
+                if diff != 1:
+                    raise ValueError(
+                        f"area has {nlev_area} vertical levels but data has {nlevels}; "
+                        "only area having one extra level is supported (levels vs layers)."
+                    )
+                warnings.warn(
+                    f"area has one more vertical level than data; "
+                    f"using the first {nlevels} levels of area to match data "
+                    "(levels vs layers).",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                area_arr = area_arr[:nlevels, :]
+        else:
+            raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
+
+        # Apply horizontal mask if provided
+        if horiz_mask is not None:
+            if area_is_2d:
+                area_arr = area_arr * horiz_mask[np.newaxis, :]
+            else:
+                area_arr = np.where(horiz_mask, area_arr, 0.0)
 
         # Compute area-weighted mean at each depth level for each time
         result = np.zeros((ntime, nlevels))
@@ -101,7 +143,12 @@ def hovmoller(
             for k in range(nlevels):
                 layer_data = data_arr[t, k, :]
                 valid = np.isfinite(layer_data)
-                valid_area = np.where(valid, area_arr, 0.0)
+                # Get area for this level
+                if area_is_2d:
+                    level_area = area_arr[k, :]
+                else:
+                    level_area = area_arr
+                valid_area = np.where(valid, level_area, 0.0)
                 total_area = np.sum(valid_area)
                 if total_area > 0:
                     result[t, k] = np.nansum(layer_data * valid_area) / total_area
@@ -138,6 +185,17 @@ def hovmoller(
             data_arr = data_arr[:, np.newaxis, :]
 
         ntime = data_arr.shape[0]
+        npoints = data_arr.shape[-1]
+
+        # For latitude mode, use surface area (first level if 2D)
+        if area_arr.ndim == 2:
+            area_1d = area_arr[0, :]
+        else:
+            area_1d = area_arr.ravel()
+
+        # Apply horizontal mask if provided
+        if horiz_mask is not None:
+            area_1d = np.where(horiz_mask, area_1d, 0.0)
 
         # Compute area-weighted mean in each latitude bin
         # Vertically integrate first if 3D
@@ -152,7 +210,7 @@ def hovmoller(
             for i in range(nlat):
                 in_bin = (lat_arr >= lat_bins[i]) & (lat_arr < lat_bins[i + 1])
                 layer_data = data_2d[t, in_bin]
-                bin_area = area_arr[in_bin]
+                bin_area = area_1d[in_bin]
                 valid = np.isfinite(layer_data)
                 valid_area = np.where(valid, bin_area, 0.0)
                 total_area = np.sum(valid_area)
@@ -232,6 +290,21 @@ def plot_hovmoller(
     y = np.asarray(y)
     data = np.asarray(data)
 
+    # Validate dimensions
+    ntime_data, ny_data = data.shape
+    if len(time) != ntime_data:
+        raise ValueError(
+            f"time array has {len(time)} elements but data has {ntime_data} "
+            f"time steps (data shape: {data.shape})"
+        )
+    if len(y) != ny_data:
+        raise ValueError(
+            f"y array has {len(y)} elements but data has {ny_data} "
+            f"y values (data shape: {data.shape}). "
+            f"Make sure you're using the y coordinates returned by hovmoller(), "
+            f"not the original mesh coordinates."
+        )
+
     # Create figure if needed
     if ax is None:
         if figsize is None:
@@ -241,6 +314,7 @@ def plot_hovmoller(
         fig = ax.get_figure()
 
     # Plot
+    # Use shading='nearest' to match coordinate arrays with data dimensions
     im = ax.pcolormesh(
         time,
         y,
@@ -248,7 +322,7 @@ def plot_hovmoller(
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        shading="auto",
+        shading="nearest",
         **kwargs,
     )
 

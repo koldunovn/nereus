@@ -18,6 +18,14 @@ Examples
 
 # Plot on different projections
 >>> fig, ax, interp = nr.plot(data, lon, lat, projection="npstere")
+
+# Compute sea ice diagnostics
+>>> nh_ice_area = nr.ice_area(sic, mesh.area, mask=mesh.lat > 0)
+>>> ice_vol = nr.ice_volume(sit, mesh.area, concentration=sic)
+
+# Ocean diagnostics
+>>> ohc = nr.heat_content(temp, mesh.area, mesh.layer_thickness)
+>>> mean_temp = nr.volume_mean(temp, mesh.area, mesh.layer_thickness, depth_max=500)
 """
 
 from nereus._version import __version__
@@ -28,8 +36,19 @@ from nereus.regrid import RegridInterpolator, regrid, set_cache_options
 # Plotting
 from nereus.plotting import plot, transect
 
+# Diagnostics (exported at top level)
+from nereus.diag import (
+    heat_content,
+    hovmoller,
+    ice_area,
+    ice_extent,
+    ice_volume,
+    plot_hovmoller,
+    volume_mean,
+)
+
 # Model-specific modules (as namespaces)
-from nereus.models import fesom, icono, icona, ifs, healpix
+from nereus.models import fesom, healpix, icona, icono, ifs
 
 __all__ = [
     # Version
@@ -41,6 +60,14 @@ __all__ = [
     # Plotting
     "plot",
     "transect",
+    # Diagnostics
+    "ice_area",
+    "ice_volume",
+    "ice_extent",
+    "volume_mean",
+    "heat_content",
+    "hovmoller",
+    "plot_hovmoller",
     # Model namespaces
     "fesom",
     "icono",

@@ -1,0 +1,266 @@
+"""Vertical/ocean diagnostics for nereus.
+
+This module provides functions for computing vertically-integrated ocean metrics:
+- volume_mean: Volume-weighted mean in a depth range
+- heat_content: Ocean heat content
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    import xarray as xr
+
+# Physical constants
+RHO_SEAWATER = 1025.0  # kg/m^3
+CP_SEAWATER = 3985.0  # J/(kg·K)
+
+
+def volume_mean(
+    data: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    thickness: NDArray[np.floating],
+    depth: NDArray[np.floating] | None = None,
+    *,
+    depth_min: float | None = None,
+    depth_max: float | None = None,
+    mask: NDArray[np.bool_] | None = None,
+) -> float | NDArray:
+    """Compute volume-weighted mean of a quantity.
+
+    Parameters
+    ----------
+    data : array_like
+        3D data with shape (nlevels, npoints) or higher-dimensional with
+        the last two axes being (nlevels, npoints). For time series,
+        shape would be (ntime, nlevels, npoints).
+    area : array_like
+        Grid cell areas in m^2, shape (npoints,).
+    thickness : array_like
+        Layer thicknesses in meters, shape (nlevels, npoints) or (nlevels,)
+        if uniform across points.
+    depth : array_like, optional
+        Depth of layer centers in meters (positive downward), shape (nlevels,).
+        Required if depth_min or depth_max are specified.
+    depth_min : float, optional
+        Minimum depth to include (meters, positive downward).
+    depth_max : float, optional
+        Maximum depth to include (meters, positive downward).
+    mask : array_like, optional
+        Boolean mask for horizontal points, shape (npoints,). True = include.
+
+    Returns
+    -------
+    float or ndarray
+        Volume-weighted mean. Returns float for 2D input (nlevels, npoints),
+        ndarray for higher-dimensional input (preserving leading dimensions).
+
+    Examples
+    --------
+    >>> # Mean temperature in upper 500m
+    >>> mean_temp = nr.volume_mean(
+    ...     temp, mesh.area, mesh.layer_thickness, mesh.depth,
+    ...     depth_max=500
+    ... )
+
+    >>> # Mean salinity over full depth
+    >>> mean_sal = nr.volume_mean(sal, mesh.area, mesh.layer_thickness)
+    """
+    # Handle xarray DataArray
+    if hasattr(data, "values"):
+        data = data.values
+    data_arr = np.asarray(data)
+    area_arr = np.asarray(area).ravel()
+    thick_arr = np.asarray(thickness)
+
+    # Ensure thickness is 2D (nlevels, npoints)
+    if thick_arr.ndim == 1:
+        # Broadcast to (nlevels, npoints)
+        nlevels = thick_arr.shape[0]
+        npoints = area_arr.shape[0]
+        thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+
+    nlevels, npoints = thick_arr.shape
+
+    # Build depth mask if needed
+    level_mask = np.ones(nlevels, dtype=bool)
+    if depth_min is not None or depth_max is not None:
+        if depth is None:
+            raise ValueError("depth array required when using depth_min/depth_max")
+        depth_arr = np.asarray(depth).ravel()
+        if depth_min is not None:
+            level_mask &= depth_arr >= depth_min
+        if depth_max is not None:
+            level_mask &= depth_arr <= depth_max
+
+    # Build horizontal mask
+    if mask is not None:
+        mask = np.asarray(mask).ravel()
+    else:
+        mask = np.ones(npoints, dtype=bool)
+
+    # Compute cell volumes: thickness * area
+    volumes = thick_arr * area_arr  # (nlevels, npoints)
+
+    # Apply masks
+    volumes = volumes * level_mask[:, np.newaxis] * mask[np.newaxis, :]
+
+    # Handle NaN in data - set volume to 0 where data is NaN
+    # For ND data, we need to handle this per timestep
+    if data_arr.ndim == 2:
+        # Shape: (nlevels, npoints)
+        valid_mask = np.isfinite(data_arr)
+        volumes_valid = np.where(valid_mask, volumes, 0.0)
+        total_volume = np.sum(volumes_valid)
+        if total_volume == 0:
+            return np.nan
+        return float(np.nansum(data_arr * volumes_valid) / total_volume)
+    else:
+        # Higher dimensional: (..., nlevels, npoints)
+        # Process keeping leading dimensions
+        leading_shape = data_arr.shape[:-2]
+        result = np.zeros(leading_shape)
+
+        # Flatten leading dimensions for iteration
+        data_flat = data_arr.reshape(-1, nlevels, npoints)
+        result_flat = result.ravel()
+
+        for i in range(data_flat.shape[0]):
+            slice_data = data_flat[i]
+            valid_mask = np.isfinite(slice_data)
+            volumes_valid = np.where(valid_mask, volumes, 0.0)
+            total_volume = np.sum(volumes_valid)
+            if total_volume == 0:
+                result_flat[i] = np.nan
+            else:
+                result_flat[i] = np.nansum(slice_data * volumes_valid) / total_volume
+
+        return result_flat.reshape(leading_shape)
+
+
+def heat_content(
+    temperature: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    thickness: NDArray[np.floating],
+    depth: NDArray[np.floating] | None = None,
+    *,
+    depth_min: float | None = None,
+    depth_max: float | None = None,
+    reference_temp: float = 0.0,
+    mask: NDArray[np.bool_] | None = None,
+    rho: float = RHO_SEAWATER,
+    cp: float = CP_SEAWATER,
+) -> float | NDArray:
+    """Compute ocean heat content.
+
+    Heat content is computed as: OHC = rho * cp * sum(T * thickness * area)
+    where the sum is over all grid cells in the specified depth range.
+
+    Parameters
+    ----------
+    temperature : array_like
+        Temperature in degrees Celsius, shape (nlevels, npoints) or higher
+        dimensional with the last two axes being (nlevels, npoints).
+    area : array_like
+        Grid cell areas in m^2, shape (npoints,).
+    thickness : array_like
+        Layer thicknesses in meters, shape (nlevels, npoints) or (nlevels,).
+    depth : array_like, optional
+        Depth of layer centers in meters (positive downward).
+        Required if depth_min or depth_max are specified.
+    depth_min : float, optional
+        Minimum depth to include (meters, positive downward).
+    depth_max : float, optional
+        Maximum depth to include (meters, positive downward).
+    reference_temp : float
+        Reference temperature for heat content calculation. Default 0°C.
+    mask : array_like, optional
+        Boolean mask for horizontal points. True = include.
+    rho : float
+        Seawater density in kg/m^3. Default 1025.
+    cp : float
+        Specific heat capacity in J/(kg·K). Default 3985.
+
+    Returns
+    -------
+    float or ndarray
+        Ocean heat content in Joules.
+
+    Examples
+    --------
+    >>> # Total ocean heat content
+    >>> ohc = nr.heat_content(temp, mesh.area, mesh.layer_thickness)
+
+    >>> # Heat content in upper 700m
+    >>> ohc_700 = nr.heat_content(
+    ...     temp, mesh.area, mesh.layer_thickness, mesh.depth,
+    ...     depth_max=700
+    ... )
+    """
+    # Handle xarray DataArray
+    if hasattr(temperature, "values"):
+        temperature = temperature.values
+    temp_arr = np.asarray(temperature)
+    area_arr = np.asarray(area).ravel()
+    thick_arr = np.asarray(thickness)
+
+    # Ensure thickness is 2D (nlevels, npoints)
+    if thick_arr.ndim == 1:
+        nlevels = thick_arr.shape[0]
+        npoints = area_arr.shape[0]
+        thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+
+    nlevels, npoints = thick_arr.shape
+
+    # Build depth mask if needed
+    level_mask = np.ones(nlevels, dtype=bool)
+    if depth_min is not None or depth_max is not None:
+        if depth is None:
+            raise ValueError("depth array required when using depth_min/depth_max")
+        depth_arr = np.asarray(depth).ravel()
+        if depth_min is not None:
+            level_mask &= depth_arr >= depth_min
+        if depth_max is not None:
+            level_mask &= depth_arr <= depth_max
+
+    # Build horizontal mask
+    if mask is not None:
+        mask = np.asarray(mask).ravel()
+    else:
+        mask = np.ones(npoints, dtype=bool)
+
+    # Compute cell volumes: thickness * area
+    volumes = thick_arr * area_arr  # (nlevels, npoints)
+
+    # Apply masks
+    volumes = volumes * level_mask[:, np.newaxis] * mask[np.newaxis, :]
+
+    # Compute heat content: rho * cp * sum((T - T_ref) * volume)
+    temp_anomaly = temp_arr - reference_temp
+
+    if temp_arr.ndim == 2:
+        # Shape: (nlevels, npoints)
+        valid_mask = np.isfinite(temp_anomaly)
+        volumes_valid = np.where(valid_mask, volumes, 0.0)
+        heat = np.nansum(temp_anomaly * volumes_valid)
+        return float(rho * cp * heat)
+    else:
+        # Higher dimensional: (..., nlevels, npoints)
+        leading_shape = temp_arr.shape[:-2]
+        result = np.zeros(leading_shape)
+
+        temp_flat = temp_anomaly.reshape(-1, nlevels, npoints)
+        result_flat = result.ravel()
+
+        for i in range(temp_flat.shape[0]):
+            slice_temp = temp_flat[i]
+            valid_mask = np.isfinite(slice_temp)
+            volumes_valid = np.where(valid_mask, volumes, 0.0)
+            heat = np.nansum(slice_temp * volumes_valid)
+            result_flat[i] = rho * cp * heat
+
+        return result_flat.reshape(leading_shape)

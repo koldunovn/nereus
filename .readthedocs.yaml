@@ -1,0 +1,35 @@
+# Read the Docs configuration file for Nereus
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+version: 2
+
+# Set the OS, Python version, and other tools
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"
+  apt_packages:
+    - libgeos-dev
+    - libproj-dev
+
+# Build documentation in the "docs/" directory with Sphinx
+sphinx:
+  configuration: docs/conf.py
+  builder: html
+  fail_on_warning: false
+
+# Generate API documentation using autodoc
+# Note: autosummary is configured in conf.py
+
+# Optionally, set formats for downloads
+formats:
+  - pdf
+  - epub
+
+# Install package and documentation dependencies
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs

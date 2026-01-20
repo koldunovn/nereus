@@ -45,6 +45,7 @@ docs = [
     "myst-parser>=2.0",
     "nbsphinx>=0.9",
     "ipython>=8.0",
+    "jupyter",
 ]
 all = ["nereus[dask,dev,docs]"]
 

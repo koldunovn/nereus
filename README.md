@@ -1,5 +1,7 @@
 # Nereus
 
+[![CI](https://github.com/koldunovn/nereus/actions/workflows/ci.yml/badge.svg)](https://github.com/koldunovn/nereus/actions/workflows/ci.yml)
+
 Python module for working with geophysical data from atmospheric and ocean models.
 
 ## Installation

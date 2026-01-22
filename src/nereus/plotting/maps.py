@@ -184,7 +184,7 @@ def plot(
             cfeature.LAND,
             facecolor="lightgray",
             edgecolor="none",
-            zorder=0,
+            zorder=1,
         )
 
     # Plot data
@@ -196,6 +196,7 @@ def plot(
         vmin=vmin,
         vmax=vmax,
         transform=data_crs,
+        zorder=0,
         **kwargs,
     )
 

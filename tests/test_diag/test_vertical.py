@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from nereus.core.types import is_dask_array
 from nereus.diag.vertical import RHO_SEAWATER, CP_SEAWATER, heat_content, volume_mean
 
 
@@ -325,3 +326,186 @@ class TestHeatContent:
         # Volumes: 100*1e6 + 100*2e6 + 100*0.5e6 + 100*1e6 = 4.5e8 m^3
         expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 4.5e8
         assert result == pytest.approx(expected, rel=1e-6)
+
+
+class TestDaskCompatibility:
+    """Tests for dask array compatibility."""
+
+    @pytest.fixture
+    def dask_deps(self):
+        """Import dask and xarray, skip if not available."""
+        da = pytest.importorskip("dask.array")
+        xr = pytest.importorskip("xarray")
+        return da, xr
+
+    def test_volume_mean_dask_basic(self, dask_deps):
+        """Test volume_mean with dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 10.0, 10.0],
+            [20.0, 20.0, 20.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6])
+        thickness_np = np.array([10.0, 10.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 3)),
+            dims=["level", "npoints"],
+        )
+
+        result = volume_mean(data, area_np, thickness_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(15.0)
+
+    def test_volume_mean_dask_multidimensional(self, dask_deps):
+        """Test volume_mean with multidimensional dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, 10.0], [20.0, 20.0]],
+            [[30.0, 30.0], [40.0, 40.0]],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([10.0, 10.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 2)),
+            dims=["time", "level", "npoints"],
+        )
+
+        result = volume_mean(data, area_np, thickness_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed[0] == pytest.approx(15.0)
+        assert computed[1] == pytest.approx(35.0)
+
+    def test_volume_mean_dask_with_depth_range(self, dask_deps):
+        """Test volume_mean with dask array and depth range."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 10.0],
+            [20.0, 20.0],
+            [30.0, 30.0],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0, 200.0])
+        depth_np = np.array([50.0, 150.0, 300.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = volume_mean(data, area_np, thickness_np, depth_np, depth_max=200.0)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(15.0)
+
+    def test_volume_mean_dask_with_mask(self, dask_deps):
+        """Test volume_mean with dask array and mask."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 100.0],
+            [20.0, 200.0],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([10.0, 10.0])
+        mask_np = np.array([True, False])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = volume_mean(data, area_np, thickness_np, mask=mask_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(15.0)
+
+    def test_heat_content_dask_basic(self, dask_deps):
+        """Test heat_content with dask array."""
+        da, xr = dask_deps
+
+        temp_np = np.array([
+            [10.0, 10.0],
+            [10.0, 10.0],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0])
+
+        temperature = xr.DataArray(
+            da.from_array(temp_np, chunks=(1, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = heat_content(temperature, area_np, thickness_np)
+
+        assert is_dask_array(result)
+        expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 4e8
+        assert float(result.compute()) == pytest.approx(expected, rel=1e-6)
+
+    def test_heat_content_dask_multidimensional(self, dask_deps):
+        """Test heat_content with multidimensional dask array."""
+        da, xr = dask_deps
+
+        temp_np = np.array([
+            [[10.0, 10.0], [10.0, 10.0]],
+            [[20.0, 20.0], [20.0, 20.0]],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0])
+
+        temperature = xr.DataArray(
+            da.from_array(temp_np, chunks=(1, 2, 2)),
+            dims=["time", "level", "npoints"],
+        )
+
+        result = heat_content(temperature, area_np, thickness_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        volume = 4e8
+        assert computed[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 10.0 * volume)
+        assert computed[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 20.0 * volume)
+
+    def test_heat_content_dask_with_reference(self, dask_deps):
+        """Test heat_content with dask array and reference temperature."""
+        da, xr = dask_deps
+
+        temp_np = np.array([
+            [15.0, 15.0],
+            [15.0, 15.0],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0])
+
+        temperature = xr.DataArray(
+            da.from_array(temp_np, chunks=(1, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = heat_content(temperature, area_np, thickness_np, reference_temp=10.0)
+
+        assert is_dask_array(result)
+        expected = RHO_SEAWATER * CP_SEAWATER * 5.0 * 4e8
+        assert float(result.compute()) == pytest.approx(expected, rel=1e-6)
+
+    def test_numpy_input_returns_eager(self, dask_deps):
+        """Test that numpy input still returns eager (non-dask) result."""
+        data_np = np.array([
+            [10.0, 10.0, 10.0],
+            [20.0, 20.0, 20.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6])
+        thickness_np = np.array([10.0, 10.0])
+
+        result = volume_mean(data_np, area_np, thickness_np)
+
+        assert not is_dask_array(result)
+        assert isinstance(result, float)
+        assert result == pytest.approx(15.0)

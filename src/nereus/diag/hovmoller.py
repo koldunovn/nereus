@@ -2,6 +2,12 @@
 
 This module provides functions for computing and plotting Hovmoller diagrams
 (time-depth or time-latitude plots).
+
+The hovmoller function is dask-friendly for mode="depth": if inputs are dask
+arrays, the result will be lazy dask arrays.
+
+For mode="latitude", dask arrays will be computed eagerly due to the binning
+operation.
 """
 
 from __future__ import annotations
@@ -12,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+
+from nereus.core.types import get_array_data, is_dask_array
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -34,6 +42,12 @@ def hovmoller(
 
     Computes area-weighted means at each time step, binned by either depth
     level or latitude.
+
+    For mode="depth", this function is dask-friendly: if inputs are dask
+    arrays, the result will be lazy dask arrays.
+
+    For mode="latitude", dask arrays will be computed eagerly due to the
+    binning operation.
 
     Parameters
     ----------
@@ -65,8 +79,9 @@ def hovmoller(
         Time coordinates.
     y_out : ndarray
         Depth or latitude coordinates.
-    data_out : ndarray
-        Hovmoller data array, shape (ntime, ny).
+    data_out : ndarray or dask.array
+        Hovmoller data array, shape (ntime, ny). For mode="depth" with dask
+        input, returns a dask array.
 
     Examples
     --------
@@ -75,23 +90,30 @@ def hovmoller(
 
     >>> # Time-latitude Hovmoller
     >>> t, lat, hov = nr.hovmoller(sst, mesh.area, time, lat=mesh.lat, mode="latitude")
+
+    >>> # With dask arrays (depth mode)
+    >>> t, z, hov = nr.hovmoller(temp_dask, mesh.area, time, depth, mode="depth")
+    >>> hov.compute()  # triggers actual computation
     """
-    # Handle xarray DataArray
-    if hasattr(data, "values"):
-        data = data.values
-    data_arr = np.asarray(data)
-    area_arr = np.asarray(area)
+    # Extract arrays, preserving dask for depth mode
+    data_arr = get_array_data(data)
+    area_arr = get_array_data(area)
+    is_lazy = is_dask_array(data)
 
     # Apply mask to horizontal points
     if mask is not None:
-        horiz_mask = np.asarray(mask).ravel()
+        horiz_mask = get_array_data(mask)
+        if hasattr(horiz_mask, "ravel"):
+            horiz_mask = horiz_mask.ravel()
+        else:
+            horiz_mask = np.asarray(horiz_mask).ravel()
     else:
         horiz_mask = None
 
     if mode == "depth":
         if depth is None:
             raise ValueError("depth array required for mode='depth'")
-        depth_arr = np.asarray(depth).ravel()
+        depth_arr = np.asarray(get_array_data(depth)).ravel()
 
         # Expect data shape: (ntime, nlevels, npoints)
         if data_arr.ndim == 2:
@@ -102,7 +124,8 @@ def hovmoller(
 
         # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
         if area_arr.ndim == 1:
-            area_arr = area_arr.ravel()
+            if hasattr(area_arr, "ravel"):
+                area_arr = area_arr.ravel()
             if area_arr.shape[0] != npoints:
                 raise ValueError(
                     f"area has {area_arr.shape[0]} points but data has {npoints}"
@@ -132,41 +155,68 @@ def hovmoller(
 
         # Apply horizontal mask if provided
         if horiz_mask is not None:
+            horiz_mask_float = horiz_mask.astype(np.float64)
             if area_is_2d:
-                area_arr = area_arr * horiz_mask[np.newaxis, :]
+                area_arr = area_arr * horiz_mask_float[np.newaxis, :]
             else:
-                area_arr = np.where(horiz_mask, area_arr, 0.0)
+                area_arr = area_arr * horiz_mask_float
 
         # Compute area-weighted mean at each depth level for each time
-        result = np.zeros((ntime, nlevels))
-        for t in range(ntime):
-            for k in range(nlevels):
-                layer_data = data_arr[t, k, :]
-                valid = np.isfinite(layer_data)
-                # Get area for this level
-                if area_is_2d:
-                    level_area = area_arr[k, :]
-                else:
-                    level_area = area_arr
-                valid_area = np.where(valid, level_area, 0.0)
-                total_area = np.sum(valid_area)
-                if total_area > 0:
-                    result[t, k] = np.nansum(layer_data * valid_area) / total_area
-                else:
-                    result[t, k] = np.nan
+        # Vectorized approach for dask compatibility
+        # data_arr shape: (ntime, nlevels, npoints)
+        # area_arr shape: (npoints,) or (nlevels, npoints)
+
+        # Get valid mask
+        valid = np.isfinite(data_arr)
+
+        # Prepare area for broadcasting
+        if area_is_2d:
+            # area_arr: (nlevels, npoints) -> (1, nlevels, npoints)
+            area_broadcast = area_arr[np.newaxis, :, :]
+        else:
+            # area_arr: (npoints,) -> (1, 1, npoints)
+            area_broadcast = area_arr[np.newaxis, np.newaxis, :]
+
+        # Compute valid area (zero where data is NaN)
+        valid_area = np.where(valid, area_broadcast, 0.0)
+
+        # Replace NaN with 0 for summation
+        data_filled = np.where(valid, data_arr, 0.0)
+
+        # Sum over points (last axis)
+        weighted_sum = np.sum(data_filled * valid_area, axis=-1)  # (ntime, nlevels)
+        total_area = np.sum(valid_area, axis=-1)  # (ntime, nlevels)
+
+        # Compute mean, handling zero area
+        result = np.where(total_area > 0, weighted_sum / total_area, np.nan)
 
         # Time array
         if time is None:
             time_out = np.arange(ntime)
         else:
-            time_out = np.asarray(time)
+            time_out = np.asarray(get_array_data(time))
 
         return time_out, depth_arr, result
 
     elif mode == "latitude":
         if lat is None:
             raise ValueError("lat array required for mode='latitude'")
-        lat_arr = np.asarray(lat).ravel()
+
+        # For latitude mode, we need eager computation due to binning
+        # Force computation if dask
+        if is_lazy:
+            if hasattr(data_arr, "compute"):
+                data_arr = data_arr.compute()
+            else:
+                data_arr = np.asarray(data_arr)
+            if hasattr(area_arr, "compute"):
+                area_arr = area_arr.compute()
+            else:
+                area_arr = np.asarray(area_arr)
+
+        data_arr = np.asarray(data_arr)
+        area_arr = np.asarray(area_arr)
+        lat_arr = np.asarray(get_array_data(lat)).ravel()
 
         # Set up latitude bins
         if lat_bins is None:
@@ -223,7 +273,7 @@ def hovmoller(
         if time is None:
             time_out = np.arange(ntime)
         else:
-            time_out = np.asarray(time)
+            time_out = np.asarray(get_array_data(time))
 
         return time_out, lat_centers, result
 

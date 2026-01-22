@@ -44,3 +44,50 @@ class MeshProtocol(HasCoordinates, HasArea, Protocol):
     """Protocol for model mesh objects."""
 
     pass
+
+
+def is_dask_array(x) -> bool:
+    """Check if array is a dask array.
+
+    Parameters
+    ----------
+    x : array_like
+        Input array (numpy, dask, or xarray).
+
+    Returns
+    -------
+    bool
+        True if the underlying data is a dask array.
+    """
+    # Check direct dask array
+    if hasattr(x, "dask"):
+        return True
+    # Check xarray with dask backend
+    if hasattr(x, "data") and hasattr(x.data, "dask"):
+        return True
+    return False
+
+
+def get_array_data(x):
+    """Extract underlying array data, preserving dask arrays.
+
+    This function extracts the underlying array from xarray DataArrays
+    while preserving dask arrays (no eager computation).
+
+    Parameters
+    ----------
+    x : array_like
+        Input array (numpy, dask, or xarray).
+
+    Returns
+    -------
+    ndarray or dask.array
+        The underlying array data.
+    """
+    # xarray with dask backend - get the dask array directly
+    if hasattr(x, "data") and hasattr(x.data, "dask"):
+        return x.data
+    # xarray DataArray with numpy backend
+    if hasattr(x, "values"):
+        return x.values
+    return x

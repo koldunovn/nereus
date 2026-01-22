@@ -3,6 +3,9 @@
 This module provides functions for computing vertically-integrated ocean metrics:
 - volume_mean: Volume-weighted mean in a depth range
 - heat_content: Ocean heat content
+
+All functions are dask-friendly: if inputs are dask arrays, the result
+will be a lazy dask array that can be computed later with ``.compute()``.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
+from nereus.core.types import get_array_data, is_dask_array
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -32,6 +37,9 @@ def volume_mean(
     mask: NDArray[np.bool_] | None = None,
 ) -> float | NDArray:
     """Compute volume-weighted mean of a quantity.
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
 
     Parameters
     ----------
@@ -60,9 +68,9 @@ def volume_mean(
 
     Returns
     -------
-    float or ndarray
-        Volume-weighted mean. Returns float for 2D input (nlevels, npoints),
-        ndarray for higher-dimensional input (preserving leading dimensions).
+    float or ndarray or dask.array
+        Volume-weighted mean. Returns float for 2D numpy input (nlevels, npoints),
+        ndarray for higher-dimensional numpy input, or dask array if inputs are dask.
 
     Examples
     --------
@@ -74,24 +82,27 @@ def volume_mean(
 
     >>> # Mean salinity over full depth
     >>> mean_sal = nr.volume_mean(sal, mesh.area, mesh.layer_thickness)
+
+    >>> # With dask arrays (lazy computation)
+    >>> mean_temp = nr.volume_mean(temp_dask, mesh.area, mesh.layer_thickness)
+    >>> mean_temp.compute()  # triggers actual computation
     """
-    # Handle xarray DataArray
-    if hasattr(data, "values"):
-        data = data.values
-    data_arr = np.asarray(data)
-    area_arr = np.asarray(area)
-    thick_arr = np.asarray(thickness)
+    # Extract arrays, preserving dask
+    data_arr = get_array_data(data)
+    area_arr = get_array_data(area)
+    thick_arr = get_array_data(thickness)
+    is_lazy = is_dask_array(data)
 
     # Get number of levels from data
     nlev_data = data_arr.shape[-2]
+    npoints = data_arr.shape[-1]
 
     # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
     if area_arr.ndim == 1:
         # Surface area only - will broadcast later
-        npoints = area_arr.shape[0]
         area_is_2d = False
     elif area_arr.ndim == 2:
-        nlev_area, npoints = area_arr.shape
+        nlev_area = area_arr.shape[0]
         area_is_2d = True
         # Check if area has one extra level (levels vs layers mismatch)
         if nlev_area != nlev_data:
@@ -112,12 +123,14 @@ def volume_mean(
     else:
         raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
 
-    # Ensure thickness is 2D (nlevels, npoints)
+    # Handle thickness - need to broadcast if 1D
     if thick_arr.ndim == 1:
         nlevels = thick_arr.shape[0]
-        thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+        # Use broadcasting instead of np.broadcast_to for dask compatibility
+        thick_2d = thick_arr[:, np.newaxis]  # Shape: (nlevels, 1)
     else:
         nlevels = thick_arr.shape[0]
+        thick_2d = thick_arr
 
     # Validate dimensions
     if nlevels != nlev_data:
@@ -125,65 +138,62 @@ def volume_mean(
             f"thickness has {nlevels} levels but data has {nlev_data}"
         )
 
-    # Build depth mask if needed
-    level_mask = np.ones(nlevels, dtype=bool)
+    # Build depth mask if needed (this is small, keep as numpy)
+    level_mask = np.ones(nlevels, dtype=np.float64)
     if depth_min is not None or depth_max is not None:
         if depth is None:
             raise ValueError("depth array required when using depth_min/depth_max")
-        depth_arr = np.asarray(depth).ravel()
+        depth_arr = np.asarray(get_array_data(depth)).ravel()
         if depth_min is not None:
-            level_mask &= depth_arr >= depth_min
+            level_mask = level_mask * (depth_arr >= depth_min)
         if depth_max is not None:
-            level_mask &= depth_arr <= depth_max
+            level_mask = level_mask * (depth_arr <= depth_max)
 
     # Build horizontal mask
     if mask is not None:
-        horiz_mask = np.asarray(mask).ravel()
+        horiz_mask = get_array_data(mask)
+        if hasattr(horiz_mask, "ravel"):
+            horiz_mask = horiz_mask.ravel()
+        else:
+            horiz_mask = np.asarray(horiz_mask).ravel()
+        horiz_mask = horiz_mask.astype(np.float64)
     else:
-        horiz_mask = np.ones(npoints, dtype=bool)
+        horiz_mask = 1.0  # Scalar, broadcasts everywhere
 
     # Compute cell volumes: thickness * area
+    # Shape: (nlevels, npoints) or broadcasts to it
     if area_is_2d:
-        # Area is (nlevels, npoints)
-        volumes = thick_arr * area_arr
+        volumes = thick_2d * area_arr
     else:
-        # Area is (npoints,), broadcast to (nlevels, npoints)
-        volumes = thick_arr * area_arr[np.newaxis, :]
+        volumes = thick_2d * area_arr[np.newaxis, :]
 
-    # Apply masks
-    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask[np.newaxis, :]
+    # Apply masks - use multiplication for dask compatibility
+    # level_mask: (nlevels,) -> (nlevels, 1)
+    # horiz_mask: (npoints,) or scalar
+    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
 
     # Handle NaN in data - set volume to 0 where data is NaN
-    # For ND data, we need to handle this per timestep
-    if data_arr.ndim == 2:
-        # Shape: (nlevels, npoints)
-        valid_mask = np.isfinite(data_arr)
-        volumes_valid = np.where(valid_mask, volumes, 0.0)
-        total_volume = np.sum(volumes_valid)
-        if total_volume == 0:
-            return np.nan
-        return float(np.nansum(data_arr * volumes_valid) / total_volume)
+    valid_mask = np.isfinite(data_arr)
+    volumes_valid = np.where(valid_mask, volumes, 0.0)
+
+    # Replace NaN with 0 for summation
+    data_filled = np.where(valid_mask, data_arr, 0.0)
+
+    # Compute weighted sum and total volume
+    # Sum over last two axes (nlevels, npoints)
+    weighted_sum = np.sum(data_filled * volumes_valid, axis=(-2, -1))
+    total_volume = np.sum(volumes_valid, axis=(-2, -1))
+
+    # Compute mean, handling zero volume
+    result = np.where(total_volume > 0, weighted_sum / total_volume, np.nan)
+
+    # Return appropriate type
+    if is_lazy:
+        return result
+    elif np.ndim(result) == 0:
+        return float(result)
     else:
-        # Higher dimensional: (..., nlevels, npoints)
-        # Process keeping leading dimensions
-        leading_shape = data_arr.shape[:-2]
-        result = np.zeros(leading_shape)
-
-        # Flatten leading dimensions for iteration
-        data_flat = data_arr.reshape(-1, nlevels, npoints)
-        result_flat = result.ravel()
-
-        for i in range(data_flat.shape[0]):
-            slice_data = data_flat[i]
-            valid_mask = np.isfinite(slice_data)
-            volumes_valid = np.where(valid_mask, volumes, 0.0)
-            total_volume = np.sum(volumes_valid)
-            if total_volume == 0:
-                result_flat[i] = np.nan
-            else:
-                result_flat[i] = np.nansum(slice_data * volumes_valid) / total_volume
-
-        return result_flat.reshape(leading_shape)
+        return result
 
 
 def heat_content(
@@ -203,6 +213,9 @@ def heat_content(
 
     Heat content is computed as: OHC = rho * cp * sum(T * thickness * area)
     where the sum is over all grid cells in the specified depth range.
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
 
     Parameters
     ----------
@@ -235,8 +248,8 @@ def heat_content(
 
     Returns
     -------
-    float or ndarray
-        Ocean heat content in Joules.
+    float or ndarray or dask.array
+        Ocean heat content in Joules. Returns a dask array if inputs are dask.
 
     Examples
     --------
@@ -248,24 +261,26 @@ def heat_content(
     ...     temp, mesh.area, mesh.layer_thickness, mesh.depth,
     ...     depth_max=700
     ... )
+
+    >>> # With dask arrays (lazy computation)
+    >>> ohc = nr.heat_content(temp_dask, mesh.area, mesh.layer_thickness)
+    >>> ohc.compute()  # triggers actual computation
     """
-    # Handle xarray DataArray
-    if hasattr(temperature, "values"):
-        temperature = temperature.values
-    temp_arr = np.asarray(temperature)
-    area_arr = np.asarray(area)
-    thick_arr = np.asarray(thickness)
+    # Extract arrays, preserving dask
+    temp_arr = get_array_data(temperature)
+    area_arr = get_array_data(area)
+    thick_arr = get_array_data(thickness)
+    is_lazy = is_dask_array(temperature)
 
     # Get number of levels from data
     nlev_data = temp_arr.shape[-2]
+    npoints = temp_arr.shape[-1]
 
     # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
     if area_arr.ndim == 1:
-        # Surface area only - will broadcast later
-        npoints = area_arr.shape[0]
         area_is_2d = False
     elif area_arr.ndim == 2:
-        nlev_area, npoints = area_arr.shape
+        nlev_area = area_arr.shape[0]
         area_is_2d = True
         # Check if area has one extra level (levels vs layers mismatch)
         if nlev_area != nlev_data:
@@ -286,12 +301,13 @@ def heat_content(
     else:
         raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
 
-    # Ensure thickness is 2D (nlevels, npoints)
+    # Handle thickness - need to broadcast if 1D
     if thick_arr.ndim == 1:
         nlevels = thick_arr.shape[0]
-        thick_arr = np.broadcast_to(thick_arr[:, np.newaxis], (nlevels, npoints))
+        thick_2d = thick_arr[:, np.newaxis]  # Shape: (nlevels, 1)
     else:
         nlevels = thick_arr.shape[0]
+        thick_2d = thick_arr
 
     # Validate dimensions
     if nlevels != nlev_data:
@@ -299,56 +315,53 @@ def heat_content(
             f"thickness has {nlevels} levels but data has {nlev_data}"
         )
 
-    # Build depth mask if needed
-    level_mask = np.ones(nlevels, dtype=bool)
+    # Build depth mask if needed (this is small, keep as numpy)
+    level_mask = np.ones(nlevels, dtype=np.float64)
     if depth_min is not None or depth_max is not None:
         if depth is None:
             raise ValueError("depth array required when using depth_min/depth_max")
-        depth_arr = np.asarray(depth).ravel()
+        depth_arr = np.asarray(get_array_data(depth)).ravel()
         if depth_min is not None:
-            level_mask &= depth_arr >= depth_min
+            level_mask = level_mask * (depth_arr >= depth_min)
         if depth_max is not None:
-            level_mask &= depth_arr <= depth_max
+            level_mask = level_mask * (depth_arr <= depth_max)
 
     # Build horizontal mask
     if mask is not None:
-        horiz_mask = np.asarray(mask).ravel()
+        horiz_mask = get_array_data(mask)
+        if hasattr(horiz_mask, "ravel"):
+            horiz_mask = horiz_mask.ravel()
+        else:
+            horiz_mask = np.asarray(horiz_mask).ravel()
+        horiz_mask = horiz_mask.astype(np.float64)
     else:
-        horiz_mask = np.ones(npoints, dtype=bool)
+        horiz_mask = 1.0  # Scalar, broadcasts everywhere
 
     # Compute cell volumes: thickness * area
     if area_is_2d:
-        # Area is (nlevels, npoints)
-        volumes = thick_arr * area_arr
+        volumes = thick_2d * area_arr
     else:
-        # Area is (npoints,), broadcast to (nlevels, npoints)
-        volumes = thick_arr * area_arr[np.newaxis, :]
+        volumes = thick_2d * area_arr[np.newaxis, :]
 
     # Apply masks
-    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask[np.newaxis, :]
+    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
 
     # Compute heat content: rho * cp * sum((T - T_ref) * volume)
     temp_anomaly = temp_arr - reference_temp
 
-    if temp_arr.ndim == 2:
-        # Shape: (nlevels, npoints)
-        valid_mask = np.isfinite(temp_anomaly)
-        volumes_valid = np.where(valid_mask, volumes, 0.0)
-        heat = np.nansum(temp_anomaly * volumes_valid)
-        return float(rho * cp * heat)
+    # Handle NaN in data
+    valid_mask = np.isfinite(temp_anomaly)
+    volumes_valid = np.where(valid_mask, volumes, 0.0)
+    temp_filled = np.where(valid_mask, temp_anomaly, 0.0)
+
+    # Sum over last two axes (nlevels, npoints)
+    heat = np.sum(temp_filled * volumes_valid, axis=(-2, -1))
+    result = rho * cp * heat
+
+    # Return appropriate type
+    if is_lazy:
+        return result
+    elif np.ndim(result) == 0:
+        return float(result)
     else:
-        # Higher dimensional: (..., nlevels, npoints)
-        leading_shape = temp_arr.shape[:-2]
-        result = np.zeros(leading_shape)
-
-        temp_flat = temp_anomaly.reshape(-1, nlevels, npoints)
-        result_flat = result.ravel()
-
-        for i in range(temp_flat.shape[0]):
-            slice_temp = temp_flat[i]
-            valid_mask = np.isfinite(slice_temp)
-            volumes_valid = np.where(valid_mask, volumes, 0.0)
-            heat = np.nansum(slice_temp * volumes_valid)
-            result_flat[i] = rho * cp * heat
-
-        return result_flat.reshape(leading_shape)
+        return result

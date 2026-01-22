@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from nereus.core.types import is_dask_array
 from nereus.diag.hovmoller import hovmoller, plot_hovmoller
 
 
@@ -368,3 +369,173 @@ class TestPlotHovmoller:
         assert ax is ax_orig
 
         plt.close(fig)
+
+
+class TestDaskCompatibility:
+    """Tests for dask array compatibility."""
+
+    @pytest.fixture
+    def dask_deps(self):
+        """Import dask and xarray, skip if not available."""
+        da = pytest.importorskip("dask.array")
+        xr = pytest.importorskip("xarray")
+        return da, xr
+
+    def test_hovmoller_depth_mode_dask(self, dask_deps):
+        """Test hovmoller depth mode with dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, 10.0, 10.0, 10.0], [20.0, 20.0, 20.0, 20.0]],
+            [[11.0, 11.0, 11.0, 11.0], [21.0, 21.0, 21.0, 21.0]],
+            [[12.0, 12.0, 12.0, 12.0], [22.0, 22.0, 22.0, 22.0]],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        depth_np = np.array([50.0, 150.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 4)),
+            dims=["time", "level", "npoints"],
+        )
+
+        time_out, depth_out, result = hovmoller(
+            data, area_np, depth=depth_np, mode="depth"
+        )
+
+        # Result should be dask array
+        assert is_dask_array(result)
+
+        # Compute and check values
+        result_computed = result.compute()
+        assert result_computed.shape == (3, 2)
+        assert result_computed[0, 0] == pytest.approx(10.0)
+        assert result_computed[0, 1] == pytest.approx(20.0)
+        assert result_computed[2, 1] == pytest.approx(22.0)
+
+    def test_hovmoller_depth_mode_dask_with_nan(self, dask_deps):
+        """Test hovmoller depth mode with dask array containing NaN."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, np.nan, 10.0, 10.0], [20.0, 20.0, 20.0, 20.0]],
+            [[11.0, 11.0, 11.0, 11.0], [21.0, np.nan, 21.0, 21.0]],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        depth_np = np.array([50.0, 150.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 4)),
+            dims=["time", "level", "npoints"],
+        )
+
+        time_out, depth_out, result = hovmoller(
+            data, area_np, depth=depth_np, mode="depth"
+        )
+
+        assert is_dask_array(result)
+        result_computed = result.compute()
+
+        # NaN should be excluded from mean
+        assert result_computed[0, 0] == pytest.approx(10.0)  # 3 valid points
+        assert result_computed[0, 1] == pytest.approx(20.0)  # 4 valid points
+        assert result_computed[1, 1] == pytest.approx(21.0)  # 3 valid points
+
+    def test_hovmoller_depth_mode_dask_with_mask(self, dask_deps):
+        """Test hovmoller depth mode with dask array and mask."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, 100.0, 10.0, 10.0], [20.0, 200.0, 20.0, 20.0]],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        depth_np = np.array([50.0, 150.0])
+        mask_np = np.array([True, False, True, True])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 4)),
+            dims=["time", "level", "npoints"],
+        )
+
+        time_out, depth_out, result = hovmoller(
+            data, area_np, depth=depth_np, mode="depth", mask=mask_np
+        )
+
+        assert is_dask_array(result)
+        result_computed = result.compute()
+
+        # Masked point (100, 200) should be excluded
+        assert result_computed[0, 0] == pytest.approx(10.0)
+        assert result_computed[0, 1] == pytest.approx(20.0)
+
+    def test_hovmoller_depth_mode_dask_2d_area(self, dask_deps):
+        """Test hovmoller depth mode with dask array and 2D area."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, 10.0], [20.0, 20.0]],
+        ])
+        area_np = np.array([
+            [1e6, 2e6],
+            [0.5e6, 1e6],
+        ])
+        depth_np = np.array([50.0, 150.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 2)),
+            dims=["time", "level", "npoints"],
+        )
+
+        time_out, depth_out, result = hovmoller(
+            data, area_np, depth=depth_np, mode="depth"
+        )
+
+        assert is_dask_array(result)
+        result_computed = result.compute()
+
+        # Level 0: areas 1e6 and 2e6, value 10 everywhere
+        # Mean = (10*1e6 + 10*2e6) / 3e6 = 10
+        assert result_computed[0, 0] == pytest.approx(10.0)
+        # Level 1: areas 0.5e6 and 1e6, value 20 everywhere
+        # Mean = (20*0.5e6 + 20*1e6) / 1.5e6 = 20
+        assert result_computed[0, 1] == pytest.approx(20.0)
+
+    def test_hovmoller_latitude_mode_dask_computes_eagerly(self, dask_deps):
+        """Test that latitude mode computes dask arrays eagerly."""
+        da, xr = dask_deps
+
+        # Create dask-backed data
+        data_np = np.array([
+            [10.0, 20.0, 30.0, 40.0],
+            [11.0, 21.0, 31.0, 41.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        lat_np = np.array([-45.0, -15.0, 15.0, 45.0])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 4)),
+            dims=["time", "npoints"],
+        )
+
+        time_out, lat_out, result = hovmoller(
+            data, area_np, lat=lat_np, mode="latitude"
+        )
+
+        # Latitude mode should return numpy array (eager computation)
+        assert not is_dask_array(result)
+        assert isinstance(result, np.ndarray)
+
+    def test_numpy_input_returns_numpy(self, dask_deps):
+        """Test that numpy input returns numpy result."""
+        data_np = np.array([
+            [[10.0, 10.0, 10.0, 10.0], [20.0, 20.0, 20.0, 20.0]],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        depth_np = np.array([50.0, 150.0])
+
+        time_out, depth_out, result = hovmoller(
+            data_np, area_np, depth=depth_np, mode="depth"
+        )
+
+        # Should return numpy array, not dask
+        assert not is_dask_array(result)
+        assert isinstance(result, np.ndarray)

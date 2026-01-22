@@ -23,6 +23,8 @@ from nereus.core.types import (
     HasCoordinates,
     IntArray,
     MeshProtocol,
+    get_array_data,
+    is_dask_array,
 )
 
 __all__ = [
@@ -39,9 +41,11 @@ __all__ = [
     "compute_element_centers",
     "create_regular_grid",
     "expand_bounds_for_polar",
+    "get_array_data",
     "great_circle_distance",
     "great_circle_path",
     "grid_cell_area",
+    "is_dask_array",
     "lonlat_to_cartesian",
     "meters_to_chord",
 ]

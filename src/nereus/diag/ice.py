@@ -4,6 +4,9 @@ This module provides functions for computing sea ice metrics:
 - ice_area: Total sea ice area
 - ice_volume: Total sea ice volume
 - ice_extent: Sea ice extent (area with concentration above threshold)
+
+All functions are dask-friendly: if inputs are dask arrays, the result
+will be a lazy dask array that can be computed later with ``.compute()``.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
+from nereus.core.types import get_array_data, is_dask_array
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -27,6 +32,9 @@ def ice_area(
 
     Sea ice area is the sum of grid cell areas weighted by ice concentration.
 
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
+
     Parameters
     ----------
     concentration : array_like
@@ -39,9 +47,9 @@ def ice_area(
 
     Returns
     -------
-    float or ndarray
-        Total sea ice area in m^2. Returns float for 1D input, ndarray
-        for ND input (preserving leading dimensions).
+    float or ndarray or dask.array
+        Total sea ice area in m^2. Returns float for 1D numpy input,
+        ndarray for ND numpy input, or dask array if inputs are dask.
 
     Examples
     --------
@@ -53,24 +61,30 @@ def ice_area(
 
     >>> # With hemisphere mask
     >>> nh_area = nr.ice_area(sic, mesh.area, mask=mesh.lat > 0)
+
+    >>> # With dask arrays (lazy computation)
+    >>> area = nr.ice_area(sic_dask, mesh.area)
+    >>> area.compute()  # triggers actual computation
     """
-    # Handle xarray DataArray
-    if hasattr(concentration, "values"):
-        concentration = concentration.values
-    conc = np.asarray(concentration)
-    area_arr = np.asarray(area).ravel()
+    # Extract arrays, preserving dask
+    conc = get_array_data(concentration)
+    area_arr = get_array_data(area)
+    is_lazy = is_dask_array(concentration)
 
-    # Validate concentration values
-    if conc.size > 0:
-        valid_conc = conc[np.isfinite(conc)]
-        if valid_conc.size > 0 and (valid_conc.min() < -0.01 or valid_conc.max() > 1.01):
-            # Allow small numerical errors
-            pass  # Could warn, but let's be permissive
+    # Flatten area - ravel() works for both numpy and dask
+    if hasattr(area_arr, "ravel"):
+        area_arr = area_arr.ravel()
+    else:
+        area_arr = np.asarray(area_arr).ravel()
 
-    # Apply mask
+    # Apply mask (np.where works with dask arrays)
     if mask is not None:
-        mask = np.asarray(mask).ravel()
-        area_arr = np.where(mask, area_arr, 0.0)
+        mask_arr = get_array_data(mask)
+        if hasattr(mask_arr, "ravel"):
+            mask_arr = mask_arr.ravel()
+        else:
+            mask_arr = np.asarray(mask_arr).ravel()
+        area_arr = np.where(mask_arr, area_arr, 0.0)
 
     # Handle NaN values - treat as zero concentration
     conc = np.where(np.isfinite(conc), conc, 0.0)
@@ -79,11 +93,15 @@ def ice_area(
     conc = np.clip(conc, 0.0, 1.0)
 
     # Compute ice area: sum(concentration * cell_area)
-    if conc.ndim == 1:
-        return float(np.sum(conc * area_arr))
+    result = np.sum(conc * area_arr, axis=-1)
+
+    # Return appropriate type
+    if is_lazy:
+        return result  # Keep lazy, user calls .compute()
+    elif np.ndim(result) == 0:
+        return float(result)
     else:
-        # ND array - sum over last axis
-        return np.sum(conc * area_arr, axis=-1)
+        return result
 
 
 def ice_volume(
@@ -95,63 +113,106 @@ def ice_volume(
 ) -> float | NDArray:
     """Compute total sea ice volume.
 
-    Sea ice volume is computed as the sum of thickness * area * concentration.
-    If concentration is not provided, it is assumed to be 1 where thickness > 0.
+    This function handles two types of thickness definitions:
+
+    **Effective thickness** (default, when concentration=None):
+        Thickness averaged over the entire grid cell, including open water.
+        This is common in model output (e.g., CICE volume-per-area variables).
+        Formula: V = sum(h_eff * cell_area)
+
+    **Real thickness** (when concentration is provided):
+        Thickness averaged only over ice-covered area (e.g., CMIP6 sithick).
+        Formula: V = sum(h_ice * concentration * cell_area)
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
 
     Parameters
     ----------
     thickness : array_like
         Sea ice thickness in meters. Can be 1D (npoints,) or ND with the
         last axis being npoints.
+
+        - If concentration is None: interpreted as effective thickness
+          (grid-cell mean, already includes open water as zero).
+        - If concentration is provided: interpreted as real thickness
+          (ice-area mean, the physical thickness of the ice itself).
+
     area : array_like
         Grid cell areas in m^2.
     concentration : array_like, optional
-        Sea ice concentration (fraction, 0-1). If None, assumed 1 where
-        thickness > 0.
+        Sea ice concentration (fraction, 0-1). Provide this when thickness
+        is "real thickness" (ice-area mean, like CMIP6 sithick). Leave as
+        None when thickness is "effective thickness" (grid-cell mean).
     mask : array_like, optional
         Boolean mask (True = include).
 
     Returns
     -------
-    float or ndarray
-        Total sea ice volume in m^3.
+    float or ndarray or dask.array
+        Total sea ice volume in m^3. Returns a dask array if inputs are
+        dask arrays (call ``.compute()`` to get the result).
 
     Examples
     --------
-    >>> volume = nr.ice_volume(sit, mesh.area)
-    >>> volume = nr.ice_volume(sit, mesh.area, concentration=sic)
+    >>> # Effective thickness (e.g., model output with volume-per-area)
+    >>> volume = nr.ice_volume(h_eff, mesh.area)
+
+    >>> # Real thickness (e.g., CMIP6 sithick) - must provide concentration
+    >>> volume = nr.ice_volume(sithick, mesh.area, concentration=siconc)
+
+    >>> # With dask arrays (lazy computation)
+    >>> volume = nr.ice_volume(h_eff_dask, mesh.area)
+    >>> volume.compute()  # triggers actual computation
+
+    Notes
+    -----
+    Common pitfall: Using real thickness (sithick) without concentration
+    will overestimate volume by a factor of 1/concentration, because it
+    assumes ice covers the entire grid cell.
     """
-    # Handle xarray DataArray
-    if hasattr(thickness, "values"):
-        thickness = thickness.values
-    thick = np.asarray(thickness)
-    area_arr = np.asarray(area).ravel()
+    # Extract arrays, preserving dask
+    thick = get_array_data(thickness)
+    area_arr = get_array_data(area)
+    is_lazy = is_dask_array(thickness)
 
-    # Handle concentration
-    if concentration is not None:
-        if hasattr(concentration, "values"):
-            concentration = concentration.values
-        conc = np.asarray(concentration)
-        conc = np.where(np.isfinite(conc), conc, 0.0)
-        conc = np.clip(conc, 0.0, 1.0)
+    # Flatten area - ravel() works for both numpy and dask
+    if hasattr(area_arr, "ravel"):
+        area_arr = area_arr.ravel()
     else:
-        # Assume full concentration where ice exists
-        conc = np.where(thick > 0, 1.0, 0.0)
+        area_arr = np.asarray(area_arr).ravel()
 
-    # Apply mask
+    # Apply mask (np.where works with dask arrays)
     if mask is not None:
-        mask = np.asarray(mask).ravel()
-        area_arr = np.where(mask, area_arr, 0.0)
+        mask_arr = get_array_data(mask)
+        if hasattr(mask_arr, "ravel"):
+            mask_arr = mask_arr.ravel()
+        else:
+            mask_arr = np.asarray(mask_arr).ravel()
+        area_arr = np.where(mask_arr, area_arr, 0.0)
 
-    # Handle NaN values
+    # Handle NaN values (np.where, np.isfinite, np.maximum work with dask)
     thick = np.where(np.isfinite(thick), thick, 0.0)
     thick = np.maximum(thick, 0.0)  # No negative thickness
 
-    # Compute volume: sum(thickness * concentration * cell_area)
-    if thick.ndim == 1:
-        return float(np.sum(thick * conc * area_arr))
+    # Compute volume based on thickness type
+    if concentration is not None:
+        # Real thickness (ice-area mean): V = h_ice * a * A_cell
+        conc = get_array_data(concentration)
+        conc = np.where(np.isfinite(conc), conc, 0.0)
+        conc = np.clip(conc, 0.0, 1.0)
+        result = np.sum(thick * conc * area_arr, axis=-1)
     else:
-        return np.sum(thick * conc * area_arr, axis=-1)
+        # Effective thickness (grid-cell mean): V = h_eff * A_cell
+        result = np.sum(thick * area_arr, axis=-1)
+
+    # Return appropriate type
+    if is_lazy:
+        return result  # Keep lazy, user calls .compute()
+    elif np.ndim(result) == 0:
+        return float(result)
+    else:
+        return result
 
 
 def ice_extent(
@@ -165,6 +226,9 @@ def ice_extent(
 
     Sea ice extent is the total area of grid cells where ice concentration
     exceeds a threshold (typically 15%).
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
 
     Parameters
     ----------
@@ -180,32 +244,50 @@ def ice_extent(
 
     Returns
     -------
-    float or ndarray
-        Total sea ice extent in m^2.
+    float or ndarray or dask.array
+        Total sea ice extent in m^2. Returns a dask array if inputs are
+        dask arrays (call ``.compute()`` to get the result).
 
     Examples
     --------
     >>> extent = nr.ice_extent(sic, mesh.area)
     >>> extent_nh = nr.ice_extent(sic, mesh.area, mask=mesh.lat > 0)
-    """
-    # Handle xarray DataArray
-    if hasattr(concentration, "values"):
-        concentration = concentration.values
-    conc = np.asarray(concentration)
-    area_arr = np.asarray(area).ravel()
 
-    # Apply mask
+    >>> # With dask arrays (lazy computation)
+    >>> extent = nr.ice_extent(sic_dask, mesh.area)
+    >>> extent.compute()  # triggers actual computation
+    """
+    # Extract arrays, preserving dask
+    conc = get_array_data(concentration)
+    area_arr = get_array_data(area)
+    is_lazy = is_dask_array(concentration)
+
+    # Flatten area - ravel() works for both numpy and dask
+    if hasattr(area_arr, "ravel"):
+        area_arr = area_arr.ravel()
+    else:
+        area_arr = np.asarray(area_arr).ravel()
+
+    # Apply mask (np.where works with dask arrays)
     if mask is not None:
-        mask = np.asarray(mask).ravel()
-        area_arr = np.where(mask, area_arr, 0.0)
+        mask_arr = get_array_data(mask)
+        if hasattr(mask_arr, "ravel"):
+            mask_arr = mask_arr.ravel()
+        else:
+            mask_arr = np.asarray(mask_arr).ravel()
+        area_arr = np.where(mask_arr, area_arr, 0.0)
 
     # Handle NaN values
     conc = np.where(np.isfinite(conc), conc, 0.0)
 
     # Compute extent: sum(cell_area) where concentration >= threshold
     ice_mask = conc >= threshold
+    result = np.sum(area_arr * ice_mask, axis=-1)
 
-    if conc.ndim == 1:
-        return float(np.sum(area_arr * ice_mask))
+    # Return appropriate type
+    if is_lazy:
+        return result  # Keep lazy, user calls .compute()
+    elif np.ndim(result) == 0:
+        return float(result)
     else:
-        return np.sum(area_arr * ice_mask, axis=-1)
+        return result

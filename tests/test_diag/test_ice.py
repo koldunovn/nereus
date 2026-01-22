@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from nereus.diag.ice import ice_area, ice_extent, ice_volume
+from nereus.core.types import is_dask_array
 
 
 class TestIceArea:
@@ -189,3 +190,206 @@ class TestIceExtent:
         assert result.shape == (2,)
         assert result[0] == pytest.approx(2e6)  # [0.20, 1.0]
         assert result[1] == pytest.approx(2e6)  # [1.0, 1.0]
+
+
+class TestDaskCompatibility:
+    """Tests for dask array compatibility."""
+
+    @pytest.fixture
+    def dask_deps(self):
+        """Import dask and xarray, skip if not available."""
+        da = pytest.importorskip("dask.array")
+        xr = pytest.importorskip("xarray")
+        return da, xr
+
+    def test_ice_area_dask_xarray(self, dask_deps):
+        """Test ice_area with xarray DataArray backed by dask."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([0.0, 0.5, 0.8, 1.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        # Create xarray with dask backend
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = ice_area(concentration, area_np)
+
+        # Should return lazy dask array
+        assert is_dask_array(result)
+
+        # Compute and check result
+        computed = float(result.compute())
+        assert computed == pytest.approx(2.3e6)
+
+    def test_ice_area_dask_multidimensional(self, dask_deps):
+        """Test ice_area with multidimensional dask array."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([
+            [0.0, 0.5, 0.8, 1.0],
+            [1.0, 1.0, 0.0, 0.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=(1, 4)),
+            dims=["time", "npoints"],
+        )
+
+        result = ice_area(concentration, area_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed[0] == pytest.approx(2.3e6)
+        assert computed[1] == pytest.approx(2e6)
+
+    def test_ice_area_dask_with_mask(self, dask_deps):
+        """Test ice_area with dask array and mask."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([0.5, 0.5, 0.5, 0.5])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        mask_np = np.array([True, True, False, False])
+
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = ice_area(concentration, area_np, mask=mask_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(1e6)
+
+    def test_ice_volume_dask_effective_thickness(self, dask_deps):
+        """Test ice_volume with dask array (effective thickness)."""
+        da, xr = dask_deps
+
+        thickness_np = np.array([0.0, 1.0, 2.0, 3.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        thickness = xr.DataArray(
+            da.from_array(thickness_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = ice_volume(thickness, area_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(6e6)
+
+    def test_ice_volume_dask_real_thickness(self, dask_deps):
+        """Test ice_volume with dask array (real thickness with concentration)."""
+        da, xr = dask_deps
+
+        thickness_np = np.array([2.0, 2.0, 2.0, 2.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        concentration_np = np.array([0.5, 0.5, 1.0, 0.0])
+
+        thickness = xr.DataArray(
+            da.from_array(thickness_np, chunks=2),
+            dims=["npoints"],
+        )
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = ice_volume(thickness, area_np, concentration=concentration)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(4e6)
+
+    def test_ice_volume_dask_multidimensional(self, dask_deps):
+        """Test ice_volume with multidimensional dask array."""
+        da, xr = dask_deps
+
+        thickness_np = np.array([
+            [1.0, 1.0, 1.0, 1.0],
+            [2.0, 2.0, 0.0, 0.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        thickness = xr.DataArray(
+            da.from_array(thickness_np, chunks=(1, 4)),
+            dims=["time", "npoints"],
+        )
+
+        result = ice_volume(thickness, area_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed[0] == pytest.approx(4e6)
+        assert computed[1] == pytest.approx(4e6)
+
+    def test_ice_extent_dask_xarray(self, dask_deps):
+        """Test ice_extent with xarray DataArray backed by dask."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([0.0, 0.10, 0.15, 0.20, 1.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6, 1e6])
+
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=3),
+            dims=["npoints"],
+        )
+
+        result = ice_extent(concentration, area_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(3e6)
+
+    def test_ice_extent_dask_multidimensional(self, dask_deps):
+        """Test ice_extent with multidimensional dask array."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([
+            [0.0, 0.10, 0.20, 1.0],
+            [1.0, 1.0, 0.10, 0.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=(1, 4)),
+            dims=["time", "npoints"],
+        )
+
+        result = ice_extent(concentration, area_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed[0] == pytest.approx(2e6)
+        assert computed[1] == pytest.approx(2e6)
+
+    def test_ice_extent_dask_with_mask(self, dask_deps):
+        """Test ice_extent with dask array and mask."""
+        da, xr = dask_deps
+
+        concentration_np = np.array([1.0, 1.0, 1.0, 1.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        mask_np = np.array([True, True, False, False])
+
+        concentration = xr.DataArray(
+            da.from_array(concentration_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = ice_extent(concentration, area_np, mask=mask_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(2e6)
+
+    def test_numpy_input_returns_eager(self, dask_deps):
+        """Test that numpy input still returns eager (non-dask) result."""
+        concentration_np = np.array([0.0, 0.5, 0.8, 1.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_area(concentration_np, area_np)
+
+        # Should return float, not dask array
+        assert not is_dask_array(result)
+        assert isinstance(result, float)
+        assert result == pytest.approx(2.3e6)

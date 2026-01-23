@@ -76,6 +76,16 @@ def surface_mean(
     area_arr = get_array_data(area)
     is_lazy = is_dask_array(data)
 
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy and not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+        warnings.warn(
+            f"Data is a dask array but area ({area_arr.nbytes / 1e6:.1f} MB) is numpy. "
+            "This can cause very large dask graphs. Consider loading all "
+            "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Flatten area
     if hasattr(area_arr, "ravel"):
         area_arr = area_arr.ravel()

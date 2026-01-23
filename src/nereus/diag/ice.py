@@ -16,6 +16,7 @@ will be a lazy dask array that can be computed later with ``.compute()``.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -76,29 +77,36 @@ def ice_area(
     area_arr = get_array_data(area)
     is_lazy = is_dask_array(concentration)
 
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy and not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+        warnings.warn(
+            f"Data is a dask array but area ({area_arr.nbytes / 1e6:.1f} MB) is numpy. "
+            "This can cause very large dask graphs. Consider loading all "
+            "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Flatten area - ravel() works for both numpy and dask
     if hasattr(area_arr, "ravel"):
         area_arr = area_arr.ravel()
     else:
         area_arr = np.asarray(area_arr).ravel()
 
-    # Apply mask (np.where works with dask arrays)
+    # Apply mask by setting area to NaN where mask is False
     if mask is not None:
         mask_arr = get_array_data(mask)
         if hasattr(mask_arr, "ravel"):
             mask_arr = mask_arr.ravel()
         else:
             mask_arr = np.asarray(mask_arr).ravel()
-        area_arr = np.where(mask_arr, area_arr, 0.0)
+        area_arr = np.where(mask_arr, area_arr, np.nan)
 
-    # Handle NaN values - treat as zero concentration
-    conc = np.where(np.isfinite(conc), conc, 0.0)
-
-    # Clip concentration to valid range
+    # Clip concentration to valid range (NaN values stay NaN)
     conc = np.clip(conc, 0.0, 1.0)
 
-    # Compute ice area: sum(concentration * cell_area)
-    result = np.sum(conc * area_arr, axis=-1)
+    # Compute ice area using nansum (NaN in conc or area automatically excluded)
+    result = np.nansum(conc * area_arr, axis=-1)
 
     # Return appropriate type
     if is_lazy:
@@ -181,35 +189,44 @@ def ice_volume(
     area_arr = get_array_data(area)
     is_lazy = is_dask_array(thickness)
 
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy and not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+        warnings.warn(
+            f"Data is a dask array but area ({area_arr.nbytes / 1e6:.1f} MB) is numpy. "
+            "This can cause very large dask graphs. Consider loading all "
+            "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Flatten area - ravel() works for both numpy and dask
     if hasattr(area_arr, "ravel"):
         area_arr = area_arr.ravel()
     else:
         area_arr = np.asarray(area_arr).ravel()
 
-    # Apply mask (np.where works with dask arrays)
+    # Apply mask by setting area to NaN where mask is False
     if mask is not None:
         mask_arr = get_array_data(mask)
         if hasattr(mask_arr, "ravel"):
             mask_arr = mask_arr.ravel()
         else:
             mask_arr = np.asarray(mask_arr).ravel()
-        area_arr = np.where(mask_arr, area_arr, 0.0)
+        area_arr = np.where(mask_arr, area_arr, np.nan)
 
-    # Handle NaN values (np.where, np.isfinite, np.maximum work with dask)
-    thick = np.where(np.isfinite(thick), thick, 0.0)
-    thick = np.maximum(thick, 0.0)  # No negative thickness
+    # Ensure no negative thickness (NaN values stay NaN)
+    thick = np.maximum(thick, 0.0)
 
-    # Compute volume based on thickness type
+    # Compute volume based on thickness type using nansum
+    # NaN in thick, conc, or area automatically excluded
     if concentration is not None:
         # Real thickness (ice-area mean): V = h_ice * a * A_cell
         conc = get_array_data(concentration)
-        conc = np.where(np.isfinite(conc), conc, 0.0)
         conc = np.clip(conc, 0.0, 1.0)
-        result = np.sum(thick * conc * area_arr, axis=-1)
+        result = np.nansum(thick * conc * area_arr, axis=-1)
     else:
         # Effective thickness (grid-cell mean): V = h_eff * A_cell
-        result = np.sum(thick * area_arr, axis=-1)
+        result = np.nansum(thick * area_arr, axis=-1)
 
     # Return appropriate type
     if is_lazy:
@@ -337,27 +354,36 @@ def ice_extent(
     area_arr = get_array_data(area)
     is_lazy = is_dask_array(concentration)
 
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy and not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+        warnings.warn(
+            f"Data is a dask array but area ({area_arr.nbytes / 1e6:.1f} MB) is numpy. "
+            "This can cause very large dask graphs. Consider loading all "
+            "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Flatten area - ravel() works for both numpy and dask
     if hasattr(area_arr, "ravel"):
         area_arr = area_arr.ravel()
     else:
         area_arr = np.asarray(area_arr).ravel()
 
-    # Apply mask (np.where works with dask arrays)
+    # Apply mask by setting area to NaN where mask is False
     if mask is not None:
         mask_arr = get_array_data(mask)
         if hasattr(mask_arr, "ravel"):
             mask_arr = mask_arr.ravel()
         else:
             mask_arr = np.asarray(mask_arr).ravel()
-        area_arr = np.where(mask_arr, area_arr, 0.0)
-
-    # Handle NaN values
-    conc = np.where(np.isfinite(conc), conc, 0.0)
+        area_arr = np.where(mask_arr, area_arr, np.nan)
 
     # Compute extent: sum(cell_area) where concentration >= threshold
+    # NaN concentration treated as not meeting threshold (comparison with NaN is False)
     ice_mask = conc >= threshold
-    result = np.sum(area_arr * ice_mask, axis=-1)
+    # Use nansum to handle NaN in area (from mask)
+    result = np.nansum(area_arr * ice_mask, axis=-1)
 
     # Return appropriate type
     if is_lazy:

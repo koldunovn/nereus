@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 # Physical constants
 RHO_SEAWATER = 1025.0  # kg/m^3
-CP_SEAWATER = 3985.0  # J/(kg·K)
+CP_SEAWATER = 3990.0  # J/(kg·K) - consistent with FESOM2
 
 
 def volume_mean(
@@ -208,11 +208,13 @@ def heat_content(
     mask: NDArray[np.bool_] | None = None,
     rho: float = RHO_SEAWATER,
     cp: float = CP_SEAWATER,
+    output: str = "total",
 ) -> float | NDArray:
     """Compute ocean heat content.
 
-    Heat content is computed as: OHC = rho * cp * sum(T * thickness * area)
-    where the sum is over all grid cells in the specified depth range.
+    Heat content can be computed as either:
+    - Total (default): OHC = rho * cp * sum(T * thickness * area) in Joules
+    - Map: OHC = rho * cp * sum_z(T * thickness) in J/m² at each point
 
     This function is dask-friendly: if inputs are dask arrays, the result
     will be a lazy dask array that can be computed later with ``.compute()``.
@@ -228,6 +230,7 @@ def heat_content(
         - 2D array of shape (nlevels, npoints) for depth-dependent area
         If 2D and has one extra level compared to data layers, the extra
         level is dropped with a warning (levels vs layers).
+        Note: area is not used when output="map".
     thickness : array_like
         Layer thicknesses in meters, shape (nlevels, npoints) or (nlevels,).
     depth : array_like, optional
@@ -244,12 +247,20 @@ def heat_content(
     rho : float
         Seawater density in kg/m^3. Default 1025.
     cp : float
-        Specific heat capacity in J/(kg·K). Default 3985.
+        Specific heat capacity in J/(kg·K). Default 3990.
+    output : str
+        Output type. One of:
+        - "total": Total heat content in Joules (scalar per timestep)
+        - "map": Heat content per unit area in J/m² (2D field at each point)
+        Default is "total".
 
     Returns
     -------
     float or ndarray or dask.array
-        Ocean heat content in Joules. Returns a dask array if inputs are dask.
+        If output="total": Ocean heat content in Joules.
+        If output="map": Heat content per unit area in J/m², shape (npoints,)
+        or (..., npoints) for higher-dimensional input.
+        Returns a dask array if inputs are dask.
 
     Examples
     --------
@@ -262,10 +273,20 @@ def heat_content(
     ...     depth_max=700
     ... )
 
+    >>> # Heat content map (J/m² at each point, like FESOM2 output)
+    >>> ohc_map = nr.heat_content(
+    ...     temp, mesh.area, mesh.layer_thickness,
+    ...     output="map"
+    ... )
+
     >>> # With dask arrays (lazy computation)
     >>> ohc = nr.heat_content(temp_dask, mesh.area, mesh.layer_thickness)
     >>> ohc.compute()  # triggers actual computation
     """
+    # Validate output parameter
+    if output not in ("total", "map"):
+        raise ValueError(f"output must be 'total' or 'map', got '{output}'")
+
     # Extract arrays, preserving dask
     temp_arr = get_array_data(temperature)
     area_arr = get_array_data(area)
@@ -277,29 +298,32 @@ def heat_content(
     npoints = temp_arr.shape[-1]
 
     # Handle area: can be 1D (npoints,) or 2D (nlevels, npoints)
-    if area_arr.ndim == 1:
-        area_is_2d = False
-    elif area_arr.ndim == 2:
-        nlev_area = area_arr.shape[0]
-        area_is_2d = True
-        # Check if area has one extra level (levels vs layers mismatch)
-        if nlev_area != nlev_data:
-            diff = nlev_area - nlev_data
-            if diff != 1:
-                raise ValueError(
-                    f"area has {nlev_area} vertical levels but data has {nlev_data}; "
-                    "only area having one extra level is supported (levels vs layers)."
+    # Only needed for output="total"
+    area_is_2d = False
+    if output == "total":
+        if area_arr.ndim == 1:
+            area_is_2d = False
+        elif area_arr.ndim == 2:
+            nlev_area = area_arr.shape[0]
+            area_is_2d = True
+            # Check if area has one extra level (levels vs layers mismatch)
+            if nlev_area != nlev_data:
+                diff = nlev_area - nlev_data
+                if diff != 1:
+                    raise ValueError(
+                        f"area has {nlev_area} vertical levels but data has {nlev_data}; "
+                        "only area having one extra level is supported (levels vs layers)."
+                    )
+                warnings.warn(
+                    f"area has one more vertical level than data; "
+                    f"using the first {nlev_data} levels of area to match data "
+                    "(levels vs layers).",
+                    UserWarning,
+                    stacklevel=2,
                 )
-            warnings.warn(
-                f"area has one more vertical level than data; "
-                f"using the first {nlev_data} levels of area to match data "
-                "(levels vs layers).",
-                UserWarning,
-                stacklevel=2,
-            )
-            area_arr = area_arr[:nlev_data, :]
-    else:
-        raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
+                area_arr = area_arr[:nlev_data, :]
+        else:
+            raise ValueError(f"area must be 1D or 2D, got {area_arr.ndim}D")
 
     # Handle thickness - need to broadcast if 1D
     if thick_arr.ndim == 1:
@@ -337,31 +361,52 @@ def heat_content(
     else:
         horiz_mask = 1.0  # Scalar, broadcasts everywhere
 
-    # Compute cell volumes: thickness * area
-    if area_is_2d:
-        volumes = thick_2d * area_arr
-    else:
-        volumes = thick_2d * area_arr[np.newaxis, :]
-
-    # Apply masks
-    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
-
-    # Compute heat content: rho * cp * sum((T - T_ref) * volume)
+    # Compute heat content: rho * cp * sum((T - T_ref) * thickness [* area])
     temp_anomaly = temp_arr - reference_temp
 
     # Handle NaN in data
     valid_mask = np.isfinite(temp_anomaly)
-    volumes_valid = np.where(valid_mask, volumes, 0.0)
     temp_filled = np.where(valid_mask, temp_anomaly, 0.0)
 
-    # Sum over last two axes (nlevels, npoints)
-    heat = np.sum(temp_filled * volumes_valid, axis=(-2, -1))
-    result = rho * cp * heat
+    if output == "total":
+        # Compute cell volumes: thickness * area
+        if area_is_2d:
+            volumes = thick_2d * area_arr
+        else:
+            volumes = thick_2d * area_arr[np.newaxis, :]
 
-    # Return appropriate type
-    if is_lazy:
-        return result
-    elif np.ndim(result) == 0:
-        return float(result)
-    else:
-        return result
+        # Apply masks
+        volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
+
+        volumes_valid = np.where(valid_mask, volumes, 0.0)
+
+        # Sum over last two axes (nlevels, npoints)
+        heat = np.sum(temp_filled * volumes_valid, axis=(-2, -1))
+        result = rho * cp * heat
+
+        # Return appropriate type
+        if is_lazy:
+            return result
+        elif np.ndim(result) == 0:
+            return float(result)
+        else:
+            return result
+
+    else:  # output == "map"
+        # Compute heat content per unit area: rho * cp * sum_z(T * thickness)
+        # Apply level mask to thickness
+        thick_masked = thick_2d * level_mask[:, np.newaxis]
+
+        thick_valid = np.where(valid_mask, thick_masked, 0.0)
+
+        # Sum over vertical axis only (second to last axis)
+        heat_per_area = np.sum(temp_filled * thick_valid, axis=-2)
+
+        # Apply horizontal mask
+        result = rho * cp * heat_per_area * horiz_mask
+
+        # Return appropriate type
+        if is_lazy:
+            return result
+        else:
+            return np.asarray(result)

@@ -137,7 +137,7 @@ Compute integrated ocean heat content:
 
 .. code-block:: python
 
-   # OHC in upper 2000m
+   # Total OHC in upper 2000m (scalar value)
    ohc = nr.heat_content(
        temp, area, thickness, depth,
        depth_max=2000,
@@ -148,6 +148,16 @@ Compute integrated ocean heat content:
    ohc_zj = ohc / 1e21
    print(f"Ocean heat content: {ohc_zj:.1f} ZJ")
 
+   # OHC map (J/m² at each point, like FESOM2 output)
+   ohc_map = nr.heat_content(
+       temp, area, thickness, depth,
+       depth_max=2000,
+       output="map"
+   )
+
+   # Plot the OHC map
+   fig, ax, _ = nr.plot(ohc_map, lon, lat, cmap="Reds")
+
 **Parameters:**
 
 - ``temperature``: Temperature field (°C)
@@ -156,13 +166,22 @@ Compute integrated ocean heat content:
 - ``depth``: Depth coordinates (m)
 - ``reference_temp``: Reference temperature (default 0°C)
 - ``rho``: Seawater density (default 1025 kg/m³)
-- ``cp``: Specific heat capacity (default 3985 J/(kg·K))
+- ``cp``: Specific heat capacity (default 3990 J/(kg·K))
+- ``output``: Output type - ``"total"`` for scalar (Joules) or ``"map"`` for per-point (J/m²)
 
-**Formula:**
+**Formulas:**
+
+Total heat content (``output="total"``):
 
 .. math::
 
    OHC = \rho \cdot c_p \cdot \sum_{i,k} (T_{i,k} - T_{ref}) \cdot A_i \cdot \Delta z_k
+
+Heat content map (``output="map"``):
+
+.. math::
+
+   OHC_i = \rho \cdot c_p \cdot \sum_{k} (T_{i,k} - T_{ref}) \cdot \Delta z_k
 
 Depth Filtering
 ~~~~~~~~~~~~~~~
@@ -454,8 +473,8 @@ Summary Table
      - Volume-weighted mean
      - Same as input
    * - ``heat_content``
-     - Integrated OHC
-     - J (→ ZJ)
+     - Integrated OHC (total or map)
+     - J (→ ZJ) or J/m²
    * - ``hovmoller``
      - Time-depth/lat arrays
      - Tuple of arrays

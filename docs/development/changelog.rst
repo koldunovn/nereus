@@ -9,6 +9,31 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
+[0.2.1] - 2026-01-23
+--------------------
+
+Added
+~~~~~
+
+**Diagnostics**
+
+- ``surface_mean``: Area-weighted mean of 2D fields at a single level
+- ``ice_area_nh``, ``ice_area_sh``: Northern/Southern Hemisphere ice area
+- ``ice_volume_nh``, ``ice_volume_sh``: Northern/Southern Hemisphere ice volume
+- ``ice_extent_nh``, ``ice_extent_sh``: Northern/Southern Hemisphere ice extent
+
+**Core**
+
+- ``get_array_data``: Extract underlying array while preserving dask arrays
+- ``is_dask_array``: Identify dask array inputs
+
+Changed
+~~~~~~~
+
+- ``heat_content``: Added ``output`` parameter supporting "total" (Joules) and "map" (J/m²) modes
+- ``heat_content``: Updated specific heat capacity constant from 3985.0 to 3990.0 J/(kg·K) to match FESOM2 standards
+- Dask support for ``ice_area``, ``ice_volume``, ``ice_extent``, ``volume_mean``, ``heat_content``, and ``hovmoller`` (depth mode)
+
 [0.2.0] - 2026-01-20
 --------------------
 

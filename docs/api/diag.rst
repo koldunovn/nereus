@@ -25,7 +25,7 @@ Constants
 ~~~~~~~~~
 
 - **RHO_SEAWATER**: Reference seawater density: ``1025.0`` kg/m³
-- **CP_SEAWATER**: Seawater specific heat capacity: ``3985.0`` J/(kg·K)
+- **CP_SEAWATER**: Seawater specific heat capacity: ``3990.0`` J/(kg·K) (consistent with FESOM2)
 
 Hovmoller Diagrams
 ------------------
@@ -131,14 +131,28 @@ where:
 Ocean Heat Content
 ~~~~~~~~~~~~~~~~~~
 
+The ``heat_content`` function supports two output modes:
+
+**Total heat content** (``output="total"``, default):
+
 .. math::
 
    OHC = \rho \cdot c_p \cdot \sum_{i,k} (T_{i,k} - T_{ref}) \cdot A_i \cdot \Delta z_k
 
+Returns total ocean heat content in Joules.
+
+**Heat content map** (``output="map"``):
+
+.. math::
+
+   OHC_i = \rho \cdot c_p \cdot \sum_{k} (T_{i,k} - T_{ref}) \cdot \Delta z_k
+
+Returns heat content per unit area at each horizontal point in J/m² (consistent with FESOM2 output).
+
 where:
 
 - :math:`\rho` = seawater density (default 1025 kg/m³)
-- :math:`c_p` = specific heat capacity (default 3985 J/(kg·K))
+- :math:`c_p` = specific heat capacity (default 3990 J/(kg·K))
 - :math:`T_{i,k}` = temperature at cell :math:`i`, level :math:`k` (°C)
 - :math:`T_{ref}` = reference temperature (default 0°C)
 - :math:`A_i` = cell area (m²)

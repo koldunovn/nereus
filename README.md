@@ -68,8 +68,11 @@ mesh = nr.fesom.load_mesh("/path/to/mesh/")
 # Compute sea ice extent
 extent = nr.ice_extent(ds.a_ice, mesh.area, threshold=0.15)
 
-# Ocean heat content
+# Ocean heat content (total in Joules)
 ohc = nr.heat_content(ds.temp, mesh.area, mesh.layer_thickness)
+
+# Ocean heat content map (J/m² at each point)
+ohc_map = nr.heat_content(ds.temp, mesh.area, mesh.layer_thickness, output="map")
 
 # Volume-weighted mean temperature
 mean_temp = nr.volume_mean(ds.temp, mesh.area, mesh.layer_thickness)

@@ -327,6 +327,155 @@ class TestHeatContent:
         expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 4.5e8
         assert result == pytest.approx(expected, rel=1e-6)
 
+    def test_heat_content_map_basic(self):
+        """Test heat content map output (J/m² at each point)."""
+        temperature = np.array([
+            [10.0, 20.0],  # Level 0
+            [10.0, 20.0],  # Level 1
+        ])
+        area = np.array([1e6, 1e6])  # Not used for map output
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness, output="map")
+
+        # Heat content per unit area: rho * cp * sum_z(T * thickness)
+        # Point 0: rho * cp * (10*100 + 10*100) = rho * cp * 2000
+        # Point 1: rho * cp * (20*100 + 20*100) = rho * cp * 4000
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
+
+    def test_heat_content_map_with_depth_range(self):
+        """Test heat content map with depth range."""
+        temperature = np.array([
+            [20.0, 30.0],  # 50m
+            [15.0, 25.0],  # 150m
+            [5.0, 10.0],   # 500m (excluded)
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0, 400.0])
+        depth = np.array([50.0, 150.0, 500.0])
+
+        result = heat_content(
+            temperature, area, thickness, depth,
+            depth_max=200.0, output="map"
+        )
+
+        # Only first two levels included
+        # Point 0: rho * cp * (20*100 + 15*100) = rho * cp * 3500
+        # Point 1: rho * cp * (30*100 + 25*100) = rho * cp * 5500
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 3500.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 5500.0)
+
+    def test_heat_content_map_with_mask(self):
+        """Test heat content map with spatial mask."""
+        temperature = np.array([
+            [10.0, 20.0],
+            [10.0, 20.0],
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+        mask = np.array([True, False])
+
+        result = heat_content(temperature, area, thickness, mask=mask, output="map")
+
+        # Point 0: rho * cp * 2000 * 1 (mask=True)
+        # Point 1: rho * cp * 4000 * 0 (mask=False)
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert result[1] == pytest.approx(0.0)
+
+    def test_heat_content_map_with_reference(self):
+        """Test heat content map with reference temperature."""
+        temperature = np.array([
+            [15.0, 25.0],
+            [15.0, 25.0],
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(
+            temperature, area, thickness,
+            reference_temp=10.0, output="map"
+        )
+
+        # Anomaly: T - 10
+        # Point 0: rho * cp * (5*100 + 5*100) = rho * cp * 1000
+        # Point 1: rho * cp * (15*100 + 15*100) = rho * cp * 3000
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 1000.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 3000.0)
+
+    def test_heat_content_map_multidimensional(self):
+        """Test heat content map with time dimension."""
+        temperature = np.array([
+            [[10.0, 20.0], [10.0, 20.0]],  # Time 0
+            [[30.0, 40.0], [30.0, 40.0]],  # Time 1
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness, output="map")
+
+        # Shape: (time, npoints)
+        assert result.shape == (2, 2)
+        # Time 0, Point 0: rho * cp * 2000
+        # Time 0, Point 1: rho * cp * 4000
+        # Time 1, Point 0: rho * cp * 6000
+        # Time 1, Point 1: rho * cp * 8000
+        assert result[0, 0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert result[0, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
+        assert result[1, 0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 6000.0)
+        assert result[1, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 8000.0)
+
+    def test_heat_content_map_with_nan(self):
+        """Test heat content map handles NaN values."""
+        temperature = np.array([
+            [10.0, np.nan],
+            [10.0, 20.0],
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness, output="map")
+
+        # Point 0: rho * cp * (10*100 + 10*100) = rho * cp * 2000
+        # Point 1: NaN excluded, only second level: rho * cp * (20*100) = rho * cp * 2000
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+
+    def test_heat_content_map_2d_thickness(self):
+        """Test heat content map with 2D thickness array."""
+        temperature = np.array([
+            [10.0, 20.0],
+            [10.0, 20.0],
+        ])
+        area = np.array([1e6, 1e6])
+        # Varying thickness per cell
+        thickness = np.array([
+            [100.0, 200.0],  # Level 0
+            [50.0, 100.0],   # Level 1
+        ])
+
+        result = heat_content(temperature, area, thickness, output="map")
+
+        # Point 0: rho * cp * (10*100 + 10*50) = rho * cp * 1500
+        # Point 1: rho * cp * (20*200 + 20*100) = rho * cp * 6000
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 1500.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 6000.0)
+
+    def test_heat_content_invalid_output(self):
+        """Test that invalid output parameter raises error."""
+        temperature = np.array([[10.0, 10.0]])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0])
+
+        with pytest.raises(ValueError, match="output must be 'total' or 'map'"):
+            heat_content(temperature, area, thickness, output="invalid")
+
 
 class TestDaskCompatibility:
     """Tests for dask array compatibility."""
@@ -509,3 +658,53 @@ class TestDaskCompatibility:
         assert not is_dask_array(result)
         assert isinstance(result, float)
         assert result == pytest.approx(15.0)
+
+    def test_heat_content_map_dask_basic(self, dask_deps):
+        """Test heat_content map output with dask array."""
+        da, xr = dask_deps
+
+        temp_np = np.array([
+            [10.0, 20.0],
+            [10.0, 20.0],
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0])
+
+        temperature = xr.DataArray(
+            da.from_array(temp_np, chunks=(1, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = heat_content(temperature, area_np, thickness_np, output="map")
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed.shape == (2,)
+        assert computed[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert computed[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
+
+    def test_heat_content_map_dask_multidimensional(self, dask_deps):
+        """Test heat_content map with multidimensional dask array."""
+        da, xr = dask_deps
+
+        temp_np = np.array([
+            [[10.0, 20.0], [10.0, 20.0]],  # Time 0
+            [[30.0, 40.0], [30.0, 40.0]],  # Time 1
+        ])
+        area_np = np.array([1e6, 1e6])
+        thickness_np = np.array([100.0, 100.0])
+
+        temperature = xr.DataArray(
+            da.from_array(temp_np, chunks=(1, 2, 2)),
+            dims=["time", "level", "npoints"],
+        )
+
+        result = heat_content(temperature, area_np, thickness_np, output="map")
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed.shape == (2, 2)
+        assert computed[0, 0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert computed[0, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
+        assert computed[1, 0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 6000.0)
+        assert computed[1, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 8000.0)

@@ -227,6 +227,24 @@ def volume_mean(
             f"thickness has {nlevels} levels but data has {nlev_data}"
         )
 
+    # For dask arrays, ensure thickness is also dask to avoid graph bloat
+    # When numpy arrays are broadcast with dask arrays, they get embedded
+    # in every task, causing massive graph sizes
+    if is_lazy and not is_dask_array(thick_2d):
+        import dask.array as da
+
+        # Get chunks from data_arr for the last two axes (nlevels, npoints)
+        data_chunks = data_arr.chunks
+        level_chunks = data_chunks[-2]  # chunks along nlevels axis
+        point_chunks = data_chunks[-1]  # chunks along npoints axis
+
+        if thick_2d.shape[-1] == 1:
+            # thick_2d is (nlevels, 1) - broadcast along points
+            thick_2d = da.from_array(thick_2d, chunks=(level_chunks, 1))
+        else:
+            # thick_2d is (nlevels, npoints)
+            thick_2d = da.from_array(thick_2d, chunks=(level_chunks, point_chunks))
+
     # Build depth mask if needed (this is small, keep as numpy)
     level_mask = np.ones(nlevels, dtype=np.float64)
     if depth_min is not None or depth_max is not None:
@@ -437,6 +455,24 @@ def heat_content(
 
     # Compute heat content: rho * cp * sum((T - T_ref) * thickness [* area])
     temp_anomaly = temp_arr - reference_temp
+
+    # For dask arrays, ensure thickness is also dask to avoid graph bloat
+    # When numpy arrays are broadcast with dask arrays, they get embedded
+    # in every task, causing massive graph sizes
+    if is_lazy and not is_dask_array(thick_2d):
+        import dask.array as da
+
+        # Get chunks from temp_arr for the last two axes (nlevels, npoints)
+        temp_chunks = temp_arr.chunks
+        level_chunks = temp_chunks[-2]  # chunks along nlevels axis
+        point_chunks = temp_chunks[-1]  # chunks along npoints axis
+
+        if thick_2d.shape[-1] == 1:
+            # thick_2d is (nlevels, 1) - broadcast along points
+            thick_2d = da.from_array(thick_2d, chunks=(level_chunks, 1))
+        else:
+            # thick_2d is (nlevels, npoints)
+            thick_2d = da.from_array(thick_2d, chunks=(level_chunks, point_chunks))
 
     if output == "total":
         # Compute cell volumes: thickness * area

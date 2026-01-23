@@ -4,7 +4,95 @@ import numpy as np
 import pytest
 
 from nereus.core.types import is_dask_array
-from nereus.diag.vertical import RHO_SEAWATER, CP_SEAWATER, heat_content, volume_mean
+from nereus.diag.vertical import (
+    RHO_SEAWATER,
+    CP_SEAWATER,
+    heat_content,
+    surface_mean,
+    volume_mean,
+)
+
+
+class TestSurfaceMean:
+    """Tests for surface_mean function."""
+
+    def test_surface_mean_basic(self):
+        """Test basic area-weighted mean."""
+        data = np.array([10.0, 20.0, 30.0])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area)
+
+        # All cells have same area, so mean is (10 + 20 + 30) / 3 = 20
+        assert result == pytest.approx(20.0)
+
+    def test_surface_mean_varying_area(self):
+        """Test surface mean with varying cell areas."""
+        data = np.array([10.0, 20.0])
+        area = np.array([3e6, 1e6])  # First cell is 3x larger
+
+        result = surface_mean(data, area)
+
+        # Total area: 4e6
+        # Weighted sum: 10*3e6 + 20*1e6 = 50e6
+        # Mean: 50e6 / 4e6 = 12.5
+        assert result == pytest.approx(12.5)
+
+    def test_surface_mean_with_mask(self):
+        """Test surface mean with spatial mask."""
+        data = np.array([10.0, 20.0, 30.0, 40.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        mask = np.array([True, True, False, False])
+
+        result = surface_mean(data, area, mask=mask)
+
+        # Only first two cells: (10 + 20) / 2 = 15
+        assert result == pytest.approx(15.0)
+
+    def test_surface_mean_with_nan(self):
+        """Test surface mean handles NaN values."""
+        data = np.array([10.0, np.nan, 30.0])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area)
+
+        # NaN is excluded: (10 + 30) / 2 = 20
+        assert result == pytest.approx(20.0)
+
+    def test_surface_mean_multidimensional(self):
+        """Test surface mean with time dimension."""
+        data = np.array([
+            [10.0, 20.0, 30.0],
+            [40.0, 50.0, 60.0],
+        ])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area)
+
+        assert result.shape == (2,)
+        assert result[0] == pytest.approx(20.0)  # (10+20+30)/3
+        assert result[1] == pytest.approx(50.0)  # (40+50+60)/3
+
+    def test_surface_mean_all_masked(self):
+        """Test surface mean when all points are masked."""
+        data = np.array([10.0, 20.0, 30.0])
+        area = np.array([1e6, 1e6, 1e6])
+        mask = np.array([False, False, False])
+
+        result = surface_mean(data, area, mask=mask)
+
+        # No valid cells -> NaN
+        assert np.isnan(result)
+
+    def test_surface_mean_all_nan(self):
+        """Test surface mean when all values are NaN."""
+        data = np.array([np.nan, np.nan, np.nan])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area)
+
+        # No valid cells -> NaN
+        assert np.isnan(result)
 
 
 class TestVolumeMean:
@@ -486,6 +574,63 @@ class TestDaskCompatibility:
         da = pytest.importorskip("dask.array")
         xr = pytest.importorskip("xarray")
         return da, xr
+
+    def test_surface_mean_dask_basic(self, dask_deps):
+        """Test surface_mean with dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([10.0, 20.0, 30.0])
+        area_np = np.array([1e6, 1e6, 1e6])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = surface_mean(data, area_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(20.0)
+
+    def test_surface_mean_dask_multidimensional(self, dask_deps):
+        """Test surface_mean with multidimensional dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 20.0, 30.0],
+            [40.0, 50.0, 60.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 3)),
+            dims=["time", "npoints"],
+        )
+
+        result = surface_mean(data, area_np)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed[0] == pytest.approx(20.0)
+        assert computed[1] == pytest.approx(50.0)
+
+    def test_surface_mean_dask_with_mask(self, dask_deps):
+        """Test surface_mean with dask array and mask."""
+        da, xr = dask_deps
+
+        data_np = np.array([10.0, 20.0, 30.0, 40.0])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        mask_np = np.array([True, True, False, False])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=2),
+            dims=["npoints"],
+        )
+
+        result = surface_mean(data, area_np, mask=mask_np)
+
+        assert is_dask_array(result)
+        assert float(result.compute()) == pytest.approx(15.0)
 
     def test_volume_mean_dask_basic(self, dask_deps):
         """Test volume_mean with dask array."""

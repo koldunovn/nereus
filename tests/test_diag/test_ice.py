@@ -3,7 +3,17 @@
 import numpy as np
 import pytest
 
-from nereus.diag.ice import ice_area, ice_extent, ice_volume
+from nereus.diag.ice import (
+    ice_area,
+    ice_area_nh,
+    ice_area_sh,
+    ice_extent,
+    ice_extent_nh,
+    ice_extent_sh,
+    ice_volume,
+    ice_volume_nh,
+    ice_volume_sh,
+)
 from nereus.core.types import is_dask_array
 
 
@@ -393,3 +403,90 @@ class TestDaskCompatibility:
         assert not is_dask_array(result)
         assert isinstance(result, float)
         assert result == pytest.approx(2.3e6)
+
+
+class TestHemisphereHelpers:
+    """Tests for hemisphere convenience functions."""
+
+    def test_ice_area_nh(self):
+        """Test Northern Hemisphere ice area."""
+        # 4 cells: 2 in NH (lat > 0), 2 in SH (lat < 0)
+        concentration = np.array([0.5, 0.5, 0.5, 0.5])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_area_nh(concentration, area, lat)
+        # Only NH cells: 0.5*1e6 + 0.5*1e6 = 1e6
+        assert result == pytest.approx(1e6)
+
+    def test_ice_area_sh(self):
+        """Test Southern Hemisphere ice area."""
+        concentration = np.array([0.5, 0.5, 0.5, 0.5])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_area_sh(concentration, area, lat)
+        # Only SH cells: 0.5*1e6 + 0.5*1e6 = 1e6
+        assert result == pytest.approx(1e6)
+
+    def test_ice_volume_nh(self):
+        """Test Northern Hemisphere ice volume."""
+        thickness = np.array([2.0, 2.0, 2.0, 2.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_volume_nh(thickness, area, lat)
+        # Only NH cells: 2*1e6 + 2*1e6 = 4e6
+        assert result == pytest.approx(4e6)
+
+    def test_ice_volume_sh_with_concentration(self):
+        """Test Southern Hemisphere ice volume with concentration."""
+        thickness = np.array([2.0, 2.0, 2.0, 2.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+        concentration = np.array([0.5, 0.5, 0.5, 0.5])
+
+        result = ice_volume_sh(thickness, area, lat, concentration)
+        # Only SH cells with concentration: 2*0.5*1e6 + 2*0.5*1e6 = 2e6
+        assert result == pytest.approx(2e6)
+
+    def test_ice_extent_nh(self):
+        """Test Northern Hemisphere ice extent."""
+        concentration = np.array([0.5, 0.1, 0.5, 0.1])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_extent_nh(concentration, area, lat)
+        # Only NH cells with conc >= 0.15: first cell only = 1e6
+        assert result == pytest.approx(1e6)
+
+    def test_ice_extent_sh_custom_threshold(self):
+        """Test Southern Hemisphere ice extent with custom threshold."""
+        concentration = np.array([0.5, 0.3, 0.5, 0.3])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_extent_sh(concentration, area, lat, threshold=0.4)
+        # SH cells with conc >= 0.4: third cell only = 1e6
+        assert result == pytest.approx(1e6)
+
+    def test_hemisphere_helpers_multidimensional(self):
+        """Test hemisphere helpers with time dimension."""
+        concentration = np.array([
+            [0.5, 0.5, 0.5, 0.5],
+            [1.0, 0.0, 1.0, 0.0],
+        ])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result_nh = ice_area_nh(concentration, area, lat)
+        result_sh = ice_area_sh(concentration, area, lat)
+
+        assert result_nh.shape == (2,)
+        assert result_sh.shape == (2,)
+        # Time 0: NH = 0.5+0.5 = 1.0e6, SH = 0.5+0.5 = 1.0e6
+        assert result_nh[0] == pytest.approx(1e6)
+        assert result_sh[0] == pytest.approx(1e6)
+        # Time 1: NH = 1.0+0.0 = 1.0e6, SH = 1.0+0.0 = 1.0e6
+        assert result_nh[1] == pytest.approx(1e6)
+        assert result_sh[1] == pytest.approx(1e6)

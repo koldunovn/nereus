@@ -1,6 +1,7 @@
 """Vertical/ocean diagnostics for nereus.
 
-This module provides functions for computing vertically-integrated ocean metrics:
+This module provides functions for computing ocean diagnostics:
+- surface_mean: Area-weighted mean for 2D fields (SST, SSS, etc.)
 - volume_mean: Volume-weighted mean in a depth range
 - heat_content: Ocean heat content
 
@@ -24,6 +25,95 @@ if TYPE_CHECKING:
 # Physical constants
 RHO_SEAWATER = 1025.0  # kg/m^3
 CP_SEAWATER = 3990.0  # J/(kg·K) - consistent with FESOM2
+
+
+def surface_mean(
+    data: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    *,
+    mask: NDArray[np.bool_] | None = None,
+) -> float | NDArray:
+    """Compute area-weighted mean of a 2D field (single level).
+
+    This is commonly used for surface fields like SST, SSS, or for
+    analyzing a single depth level.
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
+
+    Parameters
+    ----------
+    data : array_like
+        2D data with shape (npoints,) or higher-dimensional with
+        the last axis being npoints. For time series, shape would be
+        (ntime, npoints).
+    area : array_like
+        Grid cell areas in m^2, shape (npoints,).
+    mask : array_like, optional
+        Boolean mask for horizontal points, shape (npoints,). True = include.
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Area-weighted mean. Returns float for 1D numpy input (npoints,),
+        ndarray for higher-dimensional numpy input, or dask array if inputs
+        are dask.
+
+    Examples
+    --------
+    >>> # Mean SST
+    >>> mean_sst = nr.surface_mean(sst, mesh.area)
+
+    >>> # Mean SST in a region
+    >>> mean_sst = nr.surface_mean(sst, mesh.area, mask=region_mask)
+
+    >>> # With dask arrays (lazy computation)
+    >>> mean_sst = nr.surface_mean(sst_dask, mesh.area)
+    >>> mean_sst.compute()  # triggers actual computation
+    """
+    # Extract arrays, preserving dask
+    data_arr = get_array_data(data)
+    area_arr = get_array_data(area)
+    is_lazy = is_dask_array(data)
+
+    # Flatten area
+    if hasattr(area_arr, "ravel"):
+        area_arr = area_arr.ravel()
+    else:
+        area_arr = np.asarray(area_arr).ravel()
+
+    # Build mask weights
+    if mask is not None:
+        mask_arr = get_array_data(mask)
+        if hasattr(mask_arr, "ravel"):
+            mask_arr = mask_arr.ravel()
+        else:
+            mask_arr = np.asarray(mask_arr).ravel()
+        weights = np.where(mask_arr, area_arr, 0.0)
+    else:
+        weights = area_arr
+
+    # Handle NaN in data - set weight to 0 where data is NaN
+    valid_mask = np.isfinite(data_arr)
+    weights_valid = np.where(valid_mask, weights, 0.0)
+
+    # Replace NaN with 0 for summation
+    data_filled = np.where(valid_mask, data_arr, 0.0)
+
+    # Compute weighted sum and total weight
+    weighted_sum = np.sum(data_filled * weights_valid, axis=-1)
+    total_weight = np.sum(weights_valid, axis=-1)
+
+    # Compute mean, handling zero weight
+    result = np.where(total_weight > 0, weighted_sum / total_weight, np.nan)
+
+    # Return appropriate type
+    if is_lazy:
+        return result
+    elif np.ndim(result) == 0:
+        return float(result)
+    else:
+        return result
 
 
 def volume_mean(

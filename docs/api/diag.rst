@@ -8,6 +8,10 @@ The ``nereus.diag`` module provides diagnostic functions for analyzing ocean and
 Sea Ice Diagnostics
 -------------------
 
+Core functions (``ice_area``, ``ice_volume``, ``ice_extent``) compute total metrics
+with optional masking. Hemisphere convenience functions (``*_nh``, ``*_sh``) provide
+shortcuts for Northern and Southern Hemisphere calculations.
+
 .. automodule:: nereus.diag.ice
    :members:
    :undoc-members:
@@ -15,6 +19,12 @@ Sea Ice Diagnostics
 
 Vertical/Ocean Diagnostics
 --------------------------
+
+Functions for computing ocean diagnostics:
+
+- ``surface_mean``: Area-weighted mean for 2D fields (SST, SSS, single depth levels)
+- ``volume_mean``: Volume-weighted mean for 3D fields
+- ``heat_content``: Ocean heat content (total or map)
 
 .. automodule:: nereus.diag.vertical
    :members:
@@ -114,6 +124,18 @@ where:
 - :math:`h_i` = ice thickness at cell :math:`i` (m)
 - :math:`c_i` = ice concentration (optional weighting)
 - :math:`A_i` = cell area (m²)
+
+Surface Mean
+~~~~~~~~~~~~
+
+.. math::
+
+   \bar{X} = \frac{\sum_i X_i \cdot A_i}{\sum_i A_i}
+
+where:
+
+- :math:`X_i` = quantity at horizontal cell :math:`i`
+- :math:`A_i` = horizontal cell area (m²)
 
 Volume Mean
 ~~~~~~~~~~~

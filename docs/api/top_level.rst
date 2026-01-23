@@ -28,12 +28,26 @@ Sea Ice Diagnostics
 
 .. autofunction:: nereus.ice_area
 
+.. autofunction:: nereus.ice_area_nh
+
+.. autofunction:: nereus.ice_area_sh
+
 .. autofunction:: nereus.ice_volume
+
+.. autofunction:: nereus.ice_volume_nh
+
+.. autofunction:: nereus.ice_volume_sh
 
 .. autofunction:: nereus.ice_extent
 
+.. autofunction:: nereus.ice_extent_nh
+
+.. autofunction:: nereus.ice_extent_sh
+
 Ocean Diagnostics
 -----------------
+
+.. autofunction:: nereus.surface_mean
 
 .. autofunction:: nereus.volume_mean
 

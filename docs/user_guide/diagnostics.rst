@@ -80,10 +80,33 @@ Compute total sea ice volume:
 
    V_{ice} = \sum_i h_i \cdot c_i \cdot A_i
 
+Hemisphere Convenience Functions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For the common case of computing ice metrics for Northern or Southern Hemisphere:
+
+.. code-block:: python
+
+   # Northern Hemisphere sea ice
+   nh_area = nr.ice_area_nh(conc, area, lat)
+   nh_extent = nr.ice_extent_nh(conc, area, lat)
+   nh_volume = nr.ice_volume_nh(thick, area, lat)
+
+   # Southern Hemisphere sea ice
+   sh_area = nr.ice_area_sh(conc, area, lat)
+   sh_extent = nr.ice_extent_sh(conc, area, lat)
+   sh_volume = nr.ice_volume_sh(thick, area, lat)
+
+   # With concentration for real thickness
+   nh_volume = nr.ice_volume_nh(sithick, area, lat, concentration=siconc)
+
+These functions automatically create the hemisphere mask from latitude, saving you
+from having to define ``mask=lat > 0`` or ``mask=lat < 0`` each time.
+
 Regional Analysis
 ~~~~~~~~~~~~~~~~~
 
-Use masks to compute regional statistics:
+Use masks to compute regional statistics for custom regions:
 
 .. code-block:: python
 
@@ -100,6 +123,32 @@ Use masks to compute regional statistics:
 
 Ocean Diagnostics
 -----------------
+
+Surface Mean (SST, etc.)
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Compute area-weighted mean of a 2D field (single level):
+
+.. code-block:: python
+
+   # Global mean SST
+   mean_sst = nr.surface_mean(sst, area)
+
+   # Mean SST in a region
+   tropical_mask = np.abs(lat) < 23.5
+   tropical_sst = nr.surface_mean(sst, area, mask=tropical_mask)
+
+   # Mean at a specific depth level
+   temp_500m = ds.temp.isel(nz1=10)  # Select 500m level
+   mean_temp_500m = nr.surface_mean(temp_500m, area)
+
+**Formula:**
+
+.. math::
+
+   \bar{X} = \frac{\sum_i X_i \cdot A_i}{\sum_i A_i}
+
+where :math:`X_i` is the value at cell :math:`i` and :math:`A_i` is cell area.
 
 Volume Mean
 ~~~~~~~~~~~
@@ -463,14 +512,26 @@ Summary Table
    * - ``ice_area``
      - Total ice-covered area
      - m² (→ million km²)
+   * - ``ice_area_nh``, ``ice_area_sh``
+     - Hemisphere ice area
+     - m² (→ million km²)
    * - ``ice_extent``
      - Area with ice > threshold
+     - m² (→ million km²)
+   * - ``ice_extent_nh``, ``ice_extent_sh``
+     - Hemisphere ice extent
      - m² (→ million km²)
    * - ``ice_volume``
      - Total ice volume
      - m³ (→ thousand km³)
+   * - ``ice_volume_nh``, ``ice_volume_sh``
+     - Hemisphere ice volume
+     - m³ (→ thousand km³)
+   * - ``surface_mean``
+     - Area-weighted mean (2D field)
+     - Same as input
    * - ``volume_mean``
-     - Volume-weighted mean
+     - Volume-weighted mean (3D field)
      - Same as input
    * - ``heat_content``
      - Integrated OHC (total or map)

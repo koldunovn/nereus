@@ -20,10 +20,12 @@ Examples
 >>> fig, ax, interp = nr.plot(data, lon, lat, projection="npstere")
 
 # Compute sea ice diagnostics
->>> nh_ice_area = nr.ice_area(sic, mesh.area, mask=mesh.lat > 0)
+>>> nh_ice_area = nr.ice_area_nh(sic, mesh.area, mesh.lat)
+>>> sh_ice_extent = nr.ice_extent_sh(sic, mesh.area, mesh.lat)
 >>> ice_vol = nr.ice_volume(sit, mesh.area, concentration=sic)
 
 # Ocean diagnostics
+>>> mean_sst = nr.surface_mean(sst, mesh.area)
 >>> ohc = nr.heat_content(temp, mesh.area, mesh.layer_thickness)
 >>> mean_temp = nr.volume_mean(temp, mesh.area, mesh.layer_thickness, depth_max=500)
 """
@@ -42,11 +44,18 @@ from nereus.diag import (
     heat_content,
     hovmoller,
     ice_area,
+    ice_area_nh,
+    ice_area_sh,
     ice_extent,
+    ice_extent_nh,
+    ice_extent_sh,
     ice_volume,
+    ice_volume_nh,
+    ice_volume_sh,
     list_available_regions,
     load_geojson,
     plot_hovmoller,
+    surface_mean,
     volume_mean,
 )
 
@@ -63,10 +72,18 @@ __all__ = [
     # Plotting
     "plot",
     "transect",
-    # Diagnostics
+    # Diagnostics - Ice
     "ice_area",
+    "ice_area_nh",
+    "ice_area_sh",
     "ice_volume",
+    "ice_volume_nh",
+    "ice_volume_sh",
     "ice_extent",
+    "ice_extent_nh",
+    "ice_extent_sh",
+    # Diagnostics - Vertical
+    "surface_mean",
     "volume_mean",
     "heat_content",
     "hovmoller",

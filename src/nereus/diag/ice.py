@@ -5,6 +5,11 @@ This module provides functions for computing sea ice metrics:
 - ice_volume: Total sea ice volume
 - ice_extent: Sea ice extent (area with concentration above threshold)
 
+Hemisphere convenience functions are also provided:
+- ice_area_nh, ice_area_sh: Northern/Southern Hemisphere ice area
+- ice_volume_nh, ice_volume_sh: Northern/Southern Hemisphere ice volume
+- ice_extent_nh, ice_extent_sh: Northern/Southern Hemisphere ice extent
+
 All functions are dask-friendly: if inputs are dask arrays, the result
 will be a lazy dask array that can be computed later with ``.compute()``.
 """
@@ -215,6 +220,76 @@ def ice_volume(
         return result
 
 
+def ice_area_nh(
+    concentration: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+) -> float | NDArray:
+    """Compute Northern Hemisphere sea ice area.
+
+    Convenience function that calls ice_area with a Northern Hemisphere mask.
+
+    Parameters
+    ----------
+    concentration : array_like
+        Sea ice concentration (fraction, 0-1).
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Northern Hemisphere sea ice area in m^2.
+
+    Examples
+    --------
+    >>> nh_area = nr.ice_area_nh(sic, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_area(concentration, area, mask=lat_arr > 0)
+
+
+def ice_area_sh(
+    concentration: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+) -> float | NDArray:
+    """Compute Southern Hemisphere sea ice area.
+
+    Convenience function that calls ice_area with a Southern Hemisphere mask.
+
+    Parameters
+    ----------
+    concentration : array_like
+        Sea ice concentration (fraction, 0-1).
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Southern Hemisphere sea ice area in m^2.
+
+    Examples
+    --------
+    >>> sh_area = nr.ice_area_sh(sic, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_area(concentration, area, mask=lat_arr < 0)
+
+
 def ice_extent(
     concentration: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
@@ -291,3 +366,159 @@ def ice_extent(
         return float(result)
     else:
         return result
+
+
+def ice_volume_nh(
+    thickness: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    concentration: NDArray | "xr.DataArray" | None = None,
+) -> float | NDArray:
+    """Compute Northern Hemisphere sea ice volume.
+
+    Convenience function that calls ice_volume with a Northern Hemisphere mask.
+
+    Parameters
+    ----------
+    thickness : array_like
+        Sea ice thickness in meters.
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+    concentration : array_like, optional
+        Sea ice concentration (fraction, 0-1). Required if thickness
+        is "real thickness" (ice-area mean).
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Northern Hemisphere sea ice volume in m^3.
+
+    Examples
+    --------
+    >>> nh_volume = nr.ice_volume_nh(sit, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_volume(thickness, area, concentration, mask=lat_arr > 0)
+
+
+def ice_volume_sh(
+    thickness: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    concentration: NDArray | "xr.DataArray" | None = None,
+) -> float | NDArray:
+    """Compute Southern Hemisphere sea ice volume.
+
+    Convenience function that calls ice_volume with a Southern Hemisphere mask.
+
+    Parameters
+    ----------
+    thickness : array_like
+        Sea ice thickness in meters.
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+    concentration : array_like, optional
+        Sea ice concentration (fraction, 0-1). Required if thickness
+        is "real thickness" (ice-area mean).
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Southern Hemisphere sea ice volume in m^3.
+
+    Examples
+    --------
+    >>> sh_volume = nr.ice_volume_sh(sit, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_volume(thickness, area, concentration, mask=lat_arr < 0)
+
+
+def ice_extent_nh(
+    concentration: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    *,
+    threshold: float = 0.15,
+) -> float | NDArray:
+    """Compute Northern Hemisphere sea ice extent.
+
+    Convenience function that calls ice_extent with a Northern Hemisphere mask.
+
+    Parameters
+    ----------
+    concentration : array_like
+        Sea ice concentration (fraction, 0-1).
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+    threshold : float
+        Concentration threshold (default 0.15 = 15%).
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Northern Hemisphere sea ice extent in m^2.
+
+    Examples
+    --------
+    >>> nh_extent = nr.ice_extent_nh(sic, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_extent(concentration, area, threshold=threshold, mask=lat_arr > 0)
+
+
+def ice_extent_sh(
+    concentration: NDArray | "xr.DataArray",
+    area: NDArray[np.floating],
+    lat: NDArray[np.floating],
+    *,
+    threshold: float = 0.15,
+) -> float | NDArray:
+    """Compute Southern Hemisphere sea ice extent.
+
+    Convenience function that calls ice_extent with a Southern Hemisphere mask.
+
+    Parameters
+    ----------
+    concentration : array_like
+        Sea ice concentration (fraction, 0-1).
+    area : array_like
+        Grid cell areas in m^2.
+    lat : array_like
+        Latitude of grid points in degrees.
+    threshold : float
+        Concentration threshold (default 0.15 = 15%).
+
+    Returns
+    -------
+    float or ndarray or dask.array
+        Southern Hemisphere sea ice extent in m^2.
+
+    Examples
+    --------
+    >>> sh_extent = nr.ice_extent_sh(sic, mesh.area, mesh.lat)
+    """
+    lat_arr = get_array_data(lat)
+    if hasattr(lat_arr, "ravel"):
+        lat_arr = lat_arr.ravel()
+    else:
+        lat_arr = np.asarray(lat_arr).ravel()
+    return ice_extent(concentration, area, threshold=threshold, mask=lat_arr < 0)

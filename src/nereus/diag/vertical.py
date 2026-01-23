@@ -82,27 +82,26 @@ def surface_mean(
     else:
         area_arr = np.asarray(area_arr).ravel()
 
-    # Build mask weights
+    # Build weights from area, applying mask if provided
     if mask is not None:
         mask_arr = get_array_data(mask)
         if hasattr(mask_arr, "ravel"):
             mask_arr = mask_arr.ravel()
         else:
             mask_arr = np.asarray(mask_arr).ravel()
-        weights = np.where(mask_arr, area_arr, 0.0)
+        # Set weights to NaN where mask is False (will be ignored by nansum)
+        weights = np.where(mask_arr, area_arr, np.nan)
     else:
         weights = area_arr
 
-    # Handle NaN in data - set weight to 0 where data is NaN
-    valid_mask = np.isfinite(data_arr)
-    weights_valid = np.where(valid_mask, weights, 0.0)
+    # Compute weighted mean using nansum
+    # NaN values in data or weights are automatically excluded
+    weighted_sum = np.nansum(data_arr * weights, axis=-1)
 
-    # Replace NaN with 0 for summation
-    data_filled = np.where(valid_mask, data_arr, 0.0)
-
-    # Compute weighted sum and total weight
-    weighted_sum = np.sum(data_filled * weights_valid, axis=-1)
-    total_weight = np.sum(weights_valid, axis=-1)
+    # For total weight, only count weights where data is valid
+    # Use indicator trick: data * 0 + 1 gives 1 where valid, NaN where NaN
+    valid_indicator = data_arr * 0 + 1
+    total_weight = np.nansum(weights * valid_indicator, axis=-1)
 
     # Compute mean, handling zero weight
     result = np.where(total_weight > 0, weighted_sum / total_weight, np.nan)
@@ -239,17 +238,6 @@ def volume_mean(
         if depth_max is not None:
             level_mask = level_mask * (depth_arr <= depth_max)
 
-    # Build horizontal mask
-    if mask is not None:
-        horiz_mask = get_array_data(mask)
-        if hasattr(horiz_mask, "ravel"):
-            horiz_mask = horiz_mask.ravel()
-        else:
-            horiz_mask = np.asarray(horiz_mask).ravel()
-        horiz_mask = horiz_mask.astype(np.float64)
-    else:
-        horiz_mask = 1.0  # Scalar, broadcasts everywhere
-
     # Compute cell volumes: thickness * area
     # Shape: (nlevels, npoints) or broadcasts to it
     if area_is_2d:
@@ -257,22 +245,29 @@ def volume_mean(
     else:
         volumes = thick_2d * area_arr[np.newaxis, :]
 
-    # Apply masks - use multiplication for dask compatibility
-    # level_mask: (nlevels,) -> (nlevels, 1)
-    # horiz_mask: (npoints,) or scalar
-    volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
+    # Apply depth mask by setting excluded levels to NaN
+    if depth_min is not None or depth_max is not None:
+        level_mask_nan = np.where(level_mask, 1.0, np.nan)
+        volumes = volumes * level_mask_nan[:, np.newaxis]
 
-    # Handle NaN in data - set volume to 0 where data is NaN
-    valid_mask = np.isfinite(data_arr)
-    volumes_valid = np.where(valid_mask, volumes, 0.0)
+    # Apply horizontal mask by setting excluded points to NaN
+    if mask is not None:
+        horiz_mask = get_array_data(mask)
+        if hasattr(horiz_mask, "ravel"):
+            horiz_mask = horiz_mask.ravel()
+        else:
+            horiz_mask = np.asarray(horiz_mask).ravel()
+        horiz_mask_nan = np.where(horiz_mask, 1.0, np.nan)
+        volumes = volumes * horiz_mask_nan
 
-    # Replace NaN with 0 for summation
-    data_filled = np.where(valid_mask, data_arr, 0.0)
+    # Compute weighted mean using nansum
+    # NaN values in data or volumes are automatically excluded
+    weighted_sum = np.nansum(data_arr * volumes, axis=(-2, -1))
 
-    # Compute weighted sum and total volume
-    # Sum over last two axes (nlevels, npoints)
-    weighted_sum = np.sum(data_filled * volumes_valid, axis=(-2, -1))
-    total_volume = np.sum(volumes_valid, axis=(-2, -1))
+    # For total volume, only count volumes where data is valid
+    # Use indicator trick: data * 0 + 1 gives 1 where valid, NaN where NaN
+    valid_indicator = data_arr * 0 + 1
+    total_volume = np.nansum(volumes * valid_indicator, axis=(-2, -1))
 
     # Compute mean, handling zero volume
     result = np.where(total_volume > 0, weighted_sum / total_volume, np.nan)
@@ -440,23 +435,8 @@ def heat_content(
         if depth_max is not None:
             level_mask = level_mask * (depth_arr <= depth_max)
 
-    # Build horizontal mask
-    if mask is not None:
-        horiz_mask = get_array_data(mask)
-        if hasattr(horiz_mask, "ravel"):
-            horiz_mask = horiz_mask.ravel()
-        else:
-            horiz_mask = np.asarray(horiz_mask).ravel()
-        horiz_mask = horiz_mask.astype(np.float64)
-    else:
-        horiz_mask = 1.0  # Scalar, broadcasts everywhere
-
     # Compute heat content: rho * cp * sum((T - T_ref) * thickness [* area])
     temp_anomaly = temp_arr - reference_temp
-
-    # Handle NaN in data
-    valid_mask = np.isfinite(temp_anomaly)
-    temp_filled = np.where(valid_mask, temp_anomaly, 0.0)
 
     if output == "total":
         # Compute cell volumes: thickness * area
@@ -465,13 +445,24 @@ def heat_content(
         else:
             volumes = thick_2d * area_arr[np.newaxis, :]
 
-        # Apply masks
-        volumes = volumes * level_mask[:, np.newaxis] * horiz_mask
+        # Apply depth mask by setting excluded levels to NaN
+        if depth_min is not None or depth_max is not None:
+            level_mask_nan = np.where(level_mask, 1.0, np.nan)
+            volumes = volumes * level_mask_nan[:, np.newaxis]
 
-        volumes_valid = np.where(valid_mask, volumes, 0.0)
+        # Apply horizontal mask by setting excluded points to NaN
+        if mask is not None:
+            horiz_mask = get_array_data(mask)
+            if hasattr(horiz_mask, "ravel"):
+                horiz_mask = horiz_mask.ravel()
+            else:
+                horiz_mask = np.asarray(horiz_mask).ravel()
+            horiz_mask_nan = np.where(horiz_mask, 1.0, np.nan)
+            volumes = volumes * horiz_mask_nan
 
-        # Sum over last two axes (nlevels, npoints)
-        heat = np.sum(temp_filled * volumes_valid, axis=(-2, -1))
+        # Sum over last two axes (nlevels, npoints) using nansum
+        # NaN values in temp_anomaly or volumes are automatically excluded
+        heat = np.nansum(temp_anomaly * volumes, axis=(-2, -1))
         result = rho * cp * heat
 
         # Return appropriate type
@@ -484,16 +475,27 @@ def heat_content(
 
     else:  # output == "map"
         # Compute heat content per unit area: rho * cp * sum_z(T * thickness)
-        # Apply level mask to thickness
-        thick_masked = thick_2d * level_mask[:, np.newaxis]
+        thick_masked = thick_2d
 
-        thick_valid = np.where(valid_mask, thick_masked, 0.0)
+        # Apply depth mask by setting excluded levels to NaN
+        if depth_min is not None or depth_max is not None:
+            level_mask_nan = np.where(level_mask, 1.0, np.nan)
+            thick_masked = thick_masked * level_mask_nan[:, np.newaxis]
 
-        # Sum over vertical axis only (second to last axis)
-        heat_per_area = np.sum(temp_filled * thick_valid, axis=-2)
+        # Sum over vertical axis only (second to last axis) using nansum
+        # NaN values in temp_anomaly or thickness are automatically excluded
+        heat_per_area = np.nansum(temp_anomaly * thick_masked, axis=-2)
 
-        # Apply horizontal mask
-        result = rho * cp * heat_per_area * horiz_mask
+        # Apply horizontal mask (use 0 for masked points, not NaN, for map output)
+        if mask is not None:
+            horiz_mask = get_array_data(mask)
+            if hasattr(horiz_mask, "ravel"):
+                horiz_mask = horiz_mask.ravel()
+            else:
+                horiz_mask = np.asarray(horiz_mask).ravel()
+            heat_per_area = heat_per_area * horiz_mask.astype(np.float64)
+
+        result = rho * cp * heat_per_area
 
         # Return appropriate type
         if is_lazy:

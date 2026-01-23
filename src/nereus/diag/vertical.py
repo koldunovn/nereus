@@ -182,6 +182,25 @@ def volume_mean(
     thick_arr = get_array_data(thickness)
     is_lazy = is_dask_array(data)
 
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy:
+        large_numpy_arrays = []
+        # Check area - threshold ~10MB (large enough to cause issues)
+        if not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+            large_numpy_arrays.append(f"area ({area_arr.nbytes / 1e6:.1f} MB)")
+        # Check thickness
+        if not is_dask_array(thick_arr) and thick_arr.nbytes > 10_000_000:
+            large_numpy_arrays.append(f"thickness ({thick_arr.nbytes / 1e6:.1f} MB)")
+        if large_numpy_arrays:
+            warnings.warn(
+                f"Data is a dask array but {', '.join(large_numpy_arrays)} "
+                f"{'is' if len(large_numpy_arrays) == 1 else 'are'} numpy. "
+                "This can cause very large dask graphs. Consider loading all "
+                "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+                UserWarning,
+                stacklevel=2,
+            )
+
     # Get number of levels from data
     nlev_data = data_arr.shape[-2]
     npoints = data_arr.shape[-1]
@@ -395,6 +414,25 @@ def heat_content(
     area_arr = get_array_data(area)
     thick_arr = get_array_data(thickness)
     is_lazy = is_dask_array(temperature)
+
+    # Warn if dask data is mixed with large numpy arrays (causes graph bloat)
+    if is_lazy:
+        large_numpy_arrays = []
+        # Check area - threshold ~10MB (large enough to cause issues)
+        if not is_dask_array(area_arr) and area_arr.nbytes > 10_000_000:
+            large_numpy_arrays.append(f"area ({area_arr.nbytes / 1e6:.1f} MB)")
+        # Check thickness
+        if not is_dask_array(thick_arr) and thick_arr.nbytes > 10_000_000:
+            large_numpy_arrays.append(f"thickness ({thick_arr.nbytes / 1e6:.1f} MB)")
+        if large_numpy_arrays:
+            warnings.warn(
+                f"Data is a dask array but {', '.join(large_numpy_arrays)} "
+                f"{'is' if len(large_numpy_arrays) == 1 else 'are'} numpy. "
+                "This can cause very large dask graphs. Consider loading all "
+                "large arrays with dask (e.g., xr.open_dataset(..., chunks='auto')).",
+                UserWarning,
+                stacklevel=2,
+            )
 
     # Get number of levels from data
     nlev_data = temp_arr.shape[-2]

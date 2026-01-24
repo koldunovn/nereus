@@ -3,6 +3,65 @@ Model Support Guide
 
 Nereus provides specialized support for various atmospheric and ocean models with unstructured grids.
 
+Unified Mesh System
+-------------------
+
+All meshes in nereus are represented as **xarray Datasets** with standardized variable names. This provides a consistent interface across all supported models.
+
+**Key design principles:**
+
+- **Mesh IS an xr.Dataset**: No special classes, just standard xarray
+- **Standardized names**: ``lon``, ``lat``, ``area``, ``triangles``, ``depth``
+- **Standalone spatial functions**: ``nr.find_nearest(lon, lat, ...)``
+- **Auto dask detection**: Large meshes (>1M points) automatically use dask arrays
+
+Standard Variable Names
+~~~~~~~~~~~~~~~~~~~~~~~
+
+All mesh datasets contain these standardized variables:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 60
+
+   * - Variable
+     - Dimension
+     - Description
+   * - ``lon``
+     - ``(npoints,)``
+     - Longitude, normalized to [-180, 180] degrees
+   * - ``lat``
+     - ``(npoints,)``
+     - Latitude in degrees
+   * - ``area``
+     - ``(npoints,)``
+     - Cell/node area in m²
+
+Optional variables (model-dependent):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 60
+
+   * - Variable
+     - Dimension
+     - Description
+   * - ``triangles``
+     - ``(nelem, 3)``
+     - 0-indexed triangle connectivity
+   * - ``lon_tri``, ``lat_tri``
+     - ``(nelem,)``
+     - Element center coordinates
+   * - ``depth``
+     - ``(depth_level,)``
+     - Layer center depths (positive down)
+   * - ``depth_bounds``
+     - ``(depth_level, 2)``
+     - Layer interfaces
+   * - ``layer_thickness``
+     - ``(depth_level,)``
+     - Layer thickness in meters
+
 Supported Models
 ----------------
 
@@ -16,6 +75,12 @@ Supported Models
    * - ``nr.fesom``
      - FESOM2
      - Fully implemented
+   * - ``nr.healpix``
+     - HEALPix grids
+     - Fully implemented
+   * - ``nr.nemo``
+     - NEMO
+     - Fully implemented
    * - ``nr.icono``
      - ICON-Ocean
      - Planned
@@ -24,9 +89,6 @@ Supported Models
      - Planned
    * - ``nr.ifs``
      - IFS (ECMWF)
-     - Planned
-   * - ``nr.healpix``
-     - HEALPix grids
      - Planned
 
 FESOM2
@@ -41,39 +103,68 @@ Loading a FESOM2 Mesh
 
    import nereus as nr
 
-   # Load mesh from directory
+   # Load mesh from directory (returns xr.Dataset)
    mesh = nr.fesom.load_mesh("/path/to/mesh/")
+
+   # Check what we got
+   print(type(mesh))  # <class 'xarray.core.dataset.Dataset'>
+   print(mesh.sizes)  # {'npoints': 126858, 'nelem': 244659, 'nz': 47, ...}
 
 The mesh directory should contain:
 
 * ``nod2d.out``: 2D node coordinates
 * ``elem2d.out``: Element (triangle) connectivity
-* ``mesh.diag.nc`` or ``fesom.mesh.diag.nc``: Cluster areas and optional depth info
+* ``mesh.diag.nc`` or ``fesom.mesh.diag.nc``: Areas and depth info
 * ``aux3d.out`` (optional): Vertical level information
 
-Mesh Properties
-~~~~~~~~~~~~~~~
+Accessing Mesh Data
+~~~~~~~~~~~~~~~~~~~
+
+Use standard xarray syntax to access mesh variables:
 
 .. code-block:: python
 
    mesh = nr.fesom.load_mesh("/path/to/mesh/")
 
-   # Basic properties
-   print(f"2D nodes: {mesh.n2d}")
-   print(f"3D nodes: {mesh.n3d}")
-   print(f"Vertical levels: {mesh.nlev}")
+   # As xr.DataArray
+   lon = mesh["lon"]
+   lat = mesh["lat"]
+   area = mesh["area"]
 
-   # Coordinate arrays
-   lon = mesh.lon  # 1D array of longitudes
-   lat = mesh.lat  # 1D array of latitudes
-   area = mesh.area  # Cluster areas in m²
+   # As numpy arrays (for use with other functions)
+   lon_np = mesh["lon"].values
+   lat_np = mesh["lat"].values
+   area_np = mesh["area"].values
 
-   # Vertical structure
-   depth = mesh.depth  # Mid-level depths
-   depth_lev = mesh.depth_lev  # Level interfaces
+   # Check mesh attributes
+   print(mesh.attrs["nereus_mesh_type"])  # 'fesom'
+   print(mesh.attrs["nereus_dask_backend"])  # False (or True for large meshes)
 
-   # Element connectivity
-   elem = mesh.elem  # Triangle indices (n_elem, 3)
+Triangles and Element Centers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # Triangle connectivity (0-indexed)
+   triangles = mesh["triangles"].values  # Shape: (nelem, 3)
+
+   # Element center coordinates (pre-computed)
+   lon_tri = mesh["lon_tri"].values
+   lat_tri = mesh["lat_tri"].values
+
+Vertical Structure
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # Layer center depths
+   depth = mesh["depth"].values  # Shape: (nz,)
+
+   # Layer bounds
+   depth_bounds = mesh["depth_bounds"].values  # Shape: (nz, 2)
+
+   # Layer thickness
+   thickness = mesh["layer_thickness"].values  # Shape: (nz,)
 
 Opening FESOM2 Data
 ~~~~~~~~~~~~~~~~~~~
@@ -86,235 +177,250 @@ Opening FESOM2 Data
    # The dataset now has lon/lat as coordinates
    print(ds)
 
-   # Access data
-   temp = ds.temp.isel(time=0, nz1=0)
-
    # Plot directly
-   fig, ax, _ = nr.plot(temp, ds.lon, ds.lat, projection="rob")
+   fig, ax, _ = nr.plot(ds.temp.isel(time=0, nz1=0), mesh["lon"].values, mesh["lat"].values)
 
 Spatial Queries
 ~~~~~~~~~~~~~~~
 
-Find nearest mesh points to a location:
+Use standalone functions with coordinate arrays:
 
 .. code-block:: python
 
-   # Find single nearest point
-   distances, indices = mesh.find_nearest(lon=-30, lat=45)
-   print(f"Nearest node index: {indices[0]}")
-   print(f"Distance: {distances[0]/1000:.1f} km")
+   # Find nearest mesh point to a location
+   idx = nr.find_nearest(mesh["lon"].values, mesh["lat"].values, -30, 45)
+   print(f"Nearest node index: {idx}")
+
+   # With distance
+   idx, dist = nr.find_nearest(mesh["lon"].values, mesh["lat"].values, -30, 45, return_distance=True)
+   print(f"Distance: {dist/1000:.1f} km")
 
    # Find k nearest neighbors
-   distances, indices = mesh.find_nearest(lon=-30, lat=45, k=10)
+   indices = nr.find_nearest(mesh["lon"].values, mesh["lat"].values, -30, 45, k=10)
    print(f"10 nearest nodes: {indices}")
+
+   # Query multiple locations at once
+   query_lons = np.array([-30, -40, -50])
+   query_lats = np.array([45, 50, 55])
+   indices = nr.find_nearest(mesh["lon"].values, mesh["lat"].values, query_lons, query_lats)
 
 Geographic Subsetting
 ~~~~~~~~~~~~~~~~~~~~~
 
-Create masks for geographic regions:
-
 .. code-block:: python
 
    # Get mask for bounding box
-   mask = mesh.subset_by_bbox(
+   mask = nr.subset_by_bbox(
+       mesh["lon"].values, mesh["lat"].values,
        lon_min=-80, lon_max=0,
        lat_min=0, lat_max=65
    )
 
    # Apply mask to data
    atlantic_temp = temp.values[mask]
-   atlantic_lon = mesh.lon[mask]
-   atlantic_lat = mesh.lat[mask]
-   atlantic_area = mesh.area[mask]
+   atlantic_area = mesh["area"].values[mask]
 
    # Use mask in diagnostics
-   atlantic_ice = nr.ice_area(conc, mesh.area, mask=mask)
+   atlantic_ice = nr.ice_area(conc, mesh["area"], mask=mask)
 
-Working with 3D Data
-~~~~~~~~~~~~~~~~~~~~
-
-FESOM2 uses a z-level coordinate system:
+FESOM-Specific Functions
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   # Access 3D temperature
-   temp_3d = ds.temp.isel(time=0)  # Shape: (nz, npoints)
+   # Interpolate node data to element centers
+   temp_elements = nr.fesom.node_to_element(temp_nodes, mesh)
 
-   # Volume mean for specific depth range
-   mean_temp = nr.volume_mean(
+   # Interpolate element data back to nodes
+   temp_nodes = nr.fesom.element_to_node(temp_elements, mesh)
+
+   # Compute element centers (if not already present)
+   mesh = nr.fesom.compute_element_centers(mesh)
+
+HEALPix
+-------
+
+HEALPix (Hierarchical Equal Area isoLatitude Pixelization) grids are used by ICON and other models.
+
+Creating a HEALPix Mesh
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import nereus as nr
+
+   # Create mesh from number of points
+   mesh = nr.healpix.load_mesh(3145728)  # nside=512
+
+   # Or use helper function
+   npoints = nr.healpix.nside_to_npoints(512)  # 3145728
+   mesh = nr.healpix.load_mesh(npoints)
+
+   # Find appropriate nside for desired resolution
+   nside = nr.healpix.resolution_to_nside(1.0)  # ~1 degree -> nside=64
+
+HEALPix Properties
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # All pixels have equal area
+   pixel_area = mesh["area"].values[0]  # Same for all pixels
+   print(f"Pixel area: {pixel_area/1e6:.1f} km²")
+
+   # Access coordinates
+   lon = mesh["lon"].values
+   lat = mesh["lat"].values
+
+   # Mesh attributes
+   print(mesh.attrs["nside"])  # 512
+   print(mesh.attrs["ordering"])  # 'NESTED' or 'RING'
+
+NEMO
+----
+
+NEMO (Nucleus for European Modelling of the Ocean) uses structured grids that are flattened for compatibility.
+
+Loading a NEMO Mesh
+~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import nereus as nr
+
+   # Load from mesh_mask.nc file
+   mesh = nr.nemo.load_mesh("/path/to/mesh_mask.nc")
+
+   # Coordinates are flattened from 2D to 1D
+   print(mesh.sizes["npoints"])  # Total ocean points
+
+   # Original 2D shape is stored in attributes
+   print(f"Original shape: {mesh.attrs['nlon']} x {mesh.attrs['nlat']}")
+
+Universal Mesh Loader
+---------------------
+
+The ``nr.load_mesh()`` function auto-detects mesh type:
+
+.. code-block:: python
+
+   # Auto-detect FESOM mesh
+   mesh = nr.load_mesh("/path/to/fesom/mesh/")
+
+   # Auto-detect NEMO mesh
+   mesh = nr.load_mesh("/path/to/mesh_mask.nc")
+
+   # Explicit type
+   mesh = nr.load_mesh("/path/to/mesh/", mesh_type="fesom")
+
+   # HEALPix from npoints
+   mesh = nr.load_mesh(3145728, mesh_type="healpix")
+
+Creating Regular Lon-Lat Grids
+------------------------------
+
+Create regular grids as mesh datasets for comparison or regridding targets:
+
+.. code-block:: python
+
+   # 1-degree global grid
+   mesh_1deg = nr.create_lonlat_mesh(1.0)
+
+   # Different resolution in lon/lat
+   mesh = nr.create_lonlat_mesh((0.5, 0.25))  # 0.5° lon, 0.25° lat
+
+   # Regional grid
+   mesh_regional = nr.create_lonlat_mesh(
+       0.25,
+       lon_bounds=(-80, 0),
+       lat_bounds=(20, 70)
+   )
+
+Creating Meshes from Arrays
+---------------------------
+
+Create mesh datasets from existing coordinate arrays:
+
+.. code-block:: python
+
+   import numpy as np
+
+   # From 1D arrays
+   lon = np.array([...])
+   lat = np.array([...])
+   area = np.array([...])  # Optional
+
+   mesh = nr.mesh_from_arrays(lon, lat, area=area)
+
+   # 2D arrays are automatically flattened
+   lon_2d = np.array([[...]])
+   lat_2d = np.array([[...]])
+
+   mesh = nr.mesh_from_arrays(lon_2d, lat_2d)
+
+Using Meshes with Diagnostics
+-----------------------------
+
+Mesh area integrates directly with diagnostic functions:
+
+.. code-block:: python
+
+   # Sea ice area
+   ice_area = nr.ice_area(sic, mesh["area"], mask=mesh["lat"].values > 0)
+
+   # Ice extent
+   ice_extent = nr.ice_extent(sic, mesh["area"], threshold=0.15)
+
+   # Surface mean
+   sst_mean = nr.surface_mean(sst, mesh["area"])
+
+   # Volume mean (3D data)
+   temp_mean = nr.volume_mean(
        temp_3d,
-       mesh.area,
-       ds.thickness,  # Layer thicknesses
-       mesh.depth,
+       mesh["area"],
+       mesh["layer_thickness"],
+       mesh["depth"],
        depth_max=500
    )
 
-   # Vertical transect
-   fig, ax = nr.transect(
-       temp_3d, mesh.lon, mesh.lat, mesh.depth,
-       start=(-30, 60), end=(-30, -60)
-   )
+Mesh Metadata
+-------------
 
-FESOM2 File Formats
-~~~~~~~~~~~~~~~~~~~
-
-FESOM2 mesh files can be in different formats:
-
-**ASCII format** (original):
-
-.. code-block:: text
-
-   # nod2d.out - each line: node_id lon lat
-   1 -180.0 -80.0
-   2 -179.5 -80.0
-   ...
-
-   # elem2d.out - each line: elem_id node1 node2 node3
-   1 1 2 100
-   2 2 3 101
-   ...
-
-**NetCDF format** (mesh.diag.nc):
-
-.. code-block:: text
-
-   Dimensions:
-       nod2: number of 2D nodes
-       elem: number of elements
-
-   Variables:
-       cluster_area(nod2): cell areas in m²
-       ...
-
-The ``load_mesh`` function automatically detects and handles both formats.
-
-The Mesh Protocol
------------------
-
-All model meshes follow a common interface defined by :class:`~nereus.models._base.MeshBase`:
+All nereus meshes include metadata attributes:
 
 .. code-block:: python
 
-   class MeshBase(ABC):
-       """Abstract base class for model meshes."""
+   mesh.attrs["nereus_mesh_type"]     # 'fesom', 'healpix', 'nemo', 'lonlat'
+   mesh.attrs["nereus_mesh_version"]  # '1.0'
+   mesh.attrs["nereus_dask_backend"]  # True/False
+   mesh.attrs["nereus_source_path"]   # Original file path (if applicable)
 
-       @property
-       def lon(self) -> NDArray:
-           """Longitude coordinates in degrees."""
-
-       @property
-       def lat(self) -> NDArray:
-           """Latitude coordinates in degrees."""
-
-       @property
-       def area(self) -> NDArray:
-           """Cell areas in square meters."""
-
-       @property
-       def npoints(self) -> int:
-           """Number of mesh points."""
-
-       def find_nearest(self, lon, lat, k=1):
-           """Find k nearest mesh points."""
-
-       def subset_by_bbox(self, lon_min, lon_max, lat_min, lat_max):
-           """Get mask for points in bounding box."""
-
-This allows writing generic code that works with any supported model:
+Check if a dataset is a nereus mesh:
 
 .. code-block:: python
 
-   def compute_regional_stats(data, mesh, lon_min, lon_max, lat_min, lat_max):
-       """Works with any mesh that follows MeshBase."""
-       mask = mesh.subset_by_bbox(lon_min, lon_max, lat_min, lat_max)
-       return nr.volume_mean(data, mesh.area[mask], ...)
+   from nereus.core.mesh import is_nereus_mesh, get_mesh_type
 
-Future Model Support
---------------------
+   if is_nereus_mesh(ds):
+       print(f"Mesh type: {get_mesh_type(ds)}")
 
-ICON-Ocean (planned)
-~~~~~~~~~~~~~~~~~~~~
+Dask Support
+------------
 
-.. code-block:: python
-
-   # Planned API
-   mesh = nr.icono.load_mesh("icon_ocean_mesh.nc")
-
-   # Similar interface to FESOM
-   fig, ax, _ = nr.plot(data, mesh.lon, mesh.lat)
-
-ICON-Atmosphere (planned)
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Large meshes (>1M points) automatically use dask arrays:
 
 .. code-block:: python
 
-   # Planned API
-   mesh = nr.icona.load_mesh("icon_atmo_mesh.nc")
+   # Auto-detect (>1M points uses dask)
+   mesh = nr.fesom.load_mesh("/path/to/large/mesh/")
+   print(mesh.attrs["nereus_dask_backend"])  # True
 
-IFS/ECMWF (planned)
-~~~~~~~~~~~~~~~~~~~
+   # Force dask for smaller meshes
+   mesh = nr.fesom.load_mesh("/path/to/mesh/", use_dask=True)
 
-Support for ECMWF's Tco spectral transform grids:
+   # Disable dask for large meshes
+   mesh = nr.fesom.load_mesh("/path/to/mesh/", use_dask=False)
 
-.. code-block:: python
-
-   # Planned API
-   mesh = nr.ifs.load_grid("ifs_Tco1279.nc")
-
-HEALPix (planned)
-~~~~~~~~~~~~~~~~~
-
-Support for HEALPix hierarchical grids:
-
-.. code-block:: python
-
-   # Planned API
-   mesh = nr.healpix.load_grid(nside=64)
-
-Using Custom Meshes
--------------------
-
-For models not yet supported, you can work directly with coordinates:
-
-.. code-block:: python
-
-   import xarray as xr
-
-   # Load your mesh data
-   ds = xr.open_dataset("custom_mesh.nc")
-
-   lon = ds.longitude.values
-   lat = ds.latitude.values
-   area = ds.cell_area.values  # If available
-
-   # Use Nereus functions directly
-   fig, ax, interp = nr.plot(data, lon, lat, projection="rob")
-
-   # For diagnostics requiring area, provide it explicitly
-   ice_area = nr.ice_area(concentration, area)
-
-You can also create a simple mesh wrapper:
-
-.. code-block:: python
-
-   class CustomMesh:
-       def __init__(self, lon, lat, area):
-           self._lon = lon
-           self._lat = lat
-           self._area = area
-
-       @property
-       def lon(self):
-           return self._lon
-
-       @property
-       def lat(self):
-           return self._lat
-
-       @property
-       def area(self):
-           return self._area
-
-   # Use with Nereus
-   mesh = CustomMesh(lon, lat, area)
-   ice_area = nr.ice_area(conc, mesh.area)
+   # Check threshold
+   from nereus.core.mesh import DASK_THRESHOLD_POINTS
+   print(f"Dask threshold: {DASK_THRESHOLD_POINTS:,} points")  # 1,000,000

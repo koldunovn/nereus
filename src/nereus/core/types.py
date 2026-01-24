@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, Union
+from typing import TYPE_CHECKING, Literal, Protocol, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +15,10 @@ ArrayLike = Union[NDArray[np.floating], "xr.DataArray"]
 FloatArray = NDArray[np.floating]
 IntArray = NDArray[np.integer]
 BoolArray = NDArray[np.bool_]
+
+# Mesh type literals
+MeshType = Literal["fesom", "healpix", "nemo", "lonlat", "custom"]
+LonConvention = Literal["pm180", "0360"]
 
 
 class HasCoordinates(Protocol):

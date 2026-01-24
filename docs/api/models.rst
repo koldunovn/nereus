@@ -2,16 +2,16 @@ Models Module
 =============
 
 The ``nereus.models`` module provides support for specific atmospheric and ocean models.
+All mesh loaders return standardized ``xr.Dataset`` objects with consistent variable naming.
 
 .. module:: nereus.models
 
-Base Classes
-------------
+Universal Mesh Loader
+---------------------
 
-.. automodule:: nereus.models._base
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autofunction:: nereus.models.load_mesh
+
+.. autofunction:: nereus.models.detect_mesh_type
 
 .. _fesom:
 
@@ -25,8 +25,10 @@ The Finite Element Sea ice-Ocean Model version 2 uses an unstructured triangular
    :undoc-members:
    :show-inheritance:
 
-FESOM2 File Formats
+FESOM2 Mesh Loading
 ~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.fesom.load_mesh
 
 The ``load_mesh`` function expects a directory containing FESOM2 mesh files:
 
@@ -50,12 +52,12 @@ The ``load_mesh`` function expects a directory containing FESOM2 mesh files:
      2 2 3 101
      ...
 
-* ``mesh.diag.nc`` or ``fesom.mesh.diag.nc``: NetCDF file with cluster areas
+* ``mesh.diag.nc`` or ``fesom.mesh.diag.nc``: NetCDF file with node areas
 
   .. code-block:: text
 
-     Dimensions: nod2
-     Variables: cluster_area(nod2)
+     Dimensions: nod2, nz
+     Variables: nod_area(nz, nod2)
 
 **Optional files:**
 
@@ -69,13 +71,62 @@ The ``load_mesh`` function expects a directory containing FESOM2 mesh files:
      25.0
      ...
 
-ICON-Ocean (Planned)
---------------------
+FESOM2 Functions
+~~~~~~~~~~~~~~~~
 
-.. automodule:: nereus.models.icono
+.. autofunction:: nereus.models.fesom.compute_element_centers
+
+.. autofunction:: nereus.models.fesom.node_to_element
+
+.. autofunction:: nereus.models.fesom.element_to_node
+
+.. autofunction:: nereus.models.fesom.open_dataset
+
+HEALPix
+-------
+
+HEALPix (Hierarchical Equal Area isoLatitude Pixelization) grids are used by ICON and other models.
+
+.. automodule:: nereus.models.healpix
    :members:
    :undoc-members:
    :show-inheritance:
+
+HEALPix Mesh Loading
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.healpix.load_mesh
+
+HEALPix Utilities
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.healpix.nside_to_npoints
+
+.. autofunction:: nereus.models.healpix.npoints_to_nside
+
+.. autofunction:: nereus.models.healpix.resolution_to_nside
+
+NEMO
+----
+
+NEMO (Nucleus for European Modelling of the Ocean) uses structured grids.
+
+.. automodule:: nereus.models.nemo
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+NEMO Mesh Loading
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.nemo.load_mesh
+
+The NEMO mesh loader expects a ``mesh_mask.nc`` file and flattens 2D coordinates
+to 1D for compatibility with nereus functions. Original 2D shape information is
+preserved in mesh attributes.
+
+ICON-Ocean (Planned)
+--------------------
 
 .. note::
 
@@ -84,11 +135,6 @@ ICON-Ocean (Planned)
 ICON-Atmosphere (Planned)
 -------------------------
 
-.. automodule:: nereus.models.icona
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. note::
 
    ICON-Atmosphere support is planned for a future release.
@@ -96,23 +142,6 @@ ICON-Atmosphere (Planned)
 IFS (Planned)
 -------------
 
-.. automodule:: nereus.models.ifs
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. note::
 
    IFS/ECMWF support is planned for a future release.
-
-HEALPix (Planned)
------------------
-
-.. automodule:: nereus.models.healpix
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. note::
-
-   HEALPix grid support is planned for a future release.

@@ -7,6 +7,30 @@ The top-level ``nereus`` module provides the main user-facing API for quick data
 
    import nereus as nr
 
+Mesh Functions
+--------------
+
+Universal Mesh Loading
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.load_mesh
+
+Mesh Creation
+~~~~~~~~~~~~~
+
+.. autofunction:: nereus.create_lonlat_mesh
+
+.. autofunction:: nereus.mesh_from_arrays
+
+Spatial Queries
+~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.find_nearest
+
+.. autofunction:: nereus.subset_by_bbox
+
+.. autofunction:: nereus.points_in_polygon
+
 Plotting Functions
 ------------------
 
@@ -71,10 +95,11 @@ Model Submodules
 Access model-specific functionality through these namespaces:
 
 * ``nr.fesom`` - FESOM2 ocean model (:doc:`models`)
+* ``nr.healpix`` - HEALPix grids (:doc:`models`)
+* ``nr.nemo`` - NEMO ocean model (:doc:`models`)
 * ``nr.icono`` - ICON-Ocean model (planned)
 * ``nr.icona`` - ICON-Atmosphere model (planned)
 * ``nr.ifs`` - IFS/ECMWF model (planned)
-* ``nr.healpix`` - HEALPix grids (planned)
 
 Version
 -------

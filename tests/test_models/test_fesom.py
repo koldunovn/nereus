@@ -5,8 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import xarray as xr
 
-from nereus.models.fesom import FesomMesh, load_mesh
+import nereus as nr
+from nereus.models.fesom import load_mesh, open_dataset
 
 
 @pytest.fixture
@@ -56,120 +58,163 @@ def minimal_mesh_dir():
 
 
 class TestFesomMesh:
-    """Tests for FesomMesh class."""
+    """Tests for FESOM mesh loading (xr.Dataset-based)."""
 
     def test_load_basic_mesh(self, simple_mesh_dir):
-        """Test loading a basic mesh."""
+        """Test loading a basic mesh returns xr.Dataset."""
         mesh = load_mesh(simple_mesh_dir)
 
-        assert mesh.n2d == 4
-        assert len(mesh.lon) == 4
-        assert len(mesh.lat) == 4
+        assert isinstance(mesh, xr.Dataset)
+        assert mesh.sizes["npoints"] == 4
+        assert "lon" in mesh
+        assert "lat" in mesh
+        assert "area" in mesh
 
     def test_node_coordinates(self, simple_mesh_dir):
         """Test node coordinates are loaded correctly."""
         mesh = load_mesh(simple_mesh_dir)
 
-        np.testing.assert_array_almost_equal(mesh.lon, [0.0, 1.0, 0.5, 1.5])
-        np.testing.assert_array_almost_equal(mesh.lat, [0.0, 0.0, 1.0, 1.0])
+        np.testing.assert_array_almost_equal(mesh["lon"].values, [0.0, 1.0, 0.5, 1.5])
+        np.testing.assert_array_almost_equal(mesh["lat"].values, [0.0, 0.0, 1.0, 1.0])
 
     def test_element_connectivity(self, simple_mesh_dir):
         """Test element connectivity is loaded correctly."""
         mesh = load_mesh(simple_mesh_dir)
 
-        assert mesh.elem.shape == (2, 3)
+        assert "triangles" in mesh
+        assert mesh["triangles"].shape == (2, 3)
         # Should be 0-indexed
-        np.testing.assert_array_equal(mesh.elem[0], [0, 1, 2])
-        np.testing.assert_array_equal(mesh.elem[1], [1, 3, 2])
+        np.testing.assert_array_equal(mesh["triangles"].values[0], [0, 1, 2])
+        np.testing.assert_array_equal(mesh["triangles"].values[1], [1, 3, 2])
 
     def test_vertical_levels(self, simple_mesh_dir):
         """Test vertical level information."""
         mesh = load_mesh(simple_mesh_dir)
 
-        assert mesh.nlev == 2  # 3 interfaces = 2 layers
-        np.testing.assert_array_almost_equal(mesh.depth_lev, [0.0, 10.0, 100.0])
-        np.testing.assert_array_almost_equal(mesh.depth, [5.0, 55.0])
+        assert "depth" in mesh
+        assert mesh.sizes["depth_level"] == 2  # 3 interfaces = 2 layers
+        np.testing.assert_array_almost_equal(mesh["depth"].values, [5.0, 55.0])
 
     def test_layer_thickness(self, simple_mesh_dir):
         """Test layer thickness computation."""
         mesh = load_mesh(simple_mesh_dir)
 
-        thickness = mesh.layer_thickness
+        assert "layer_thickness" in mesh
+        thickness = mesh["layer_thickness"].values
         np.testing.assert_array_almost_equal(thickness, [10.0, 90.0])
 
-    def test_n3d(self, simple_mesh_dir):
-        """Test total 3D node count."""
+    def test_depth_bounds(self, simple_mesh_dir):
+        """Test depth bounds computation."""
         mesh = load_mesh(simple_mesh_dir)
 
-        assert mesh.n3d == mesh.n2d * mesh.nlev
-        assert mesh.n3d == 4 * 2
+        assert "depth_bounds" in mesh
+        bounds = mesh["depth_bounds"].values
+        np.testing.assert_array_almost_equal(bounds[0], [0.0, 10.0])
+        np.testing.assert_array_almost_equal(bounds[1], [10.0, 100.0])
 
     def test_area_computed(self, simple_mesh_dir):
         """Test that area is computed from elements."""
         mesh = load_mesh(simple_mesh_dir)
 
-        assert len(mesh.area) == mesh.n2d
-        assert np.all(mesh.area > 0)  # All areas should be positive
+        assert "area" in mesh
+        assert len(mesh["area"]) == mesh.sizes["npoints"]
+        assert np.all(mesh["area"].values > 0)  # All areas should be positive
+
+    def test_element_centers(self, simple_mesh_dir):
+        """Test element center coordinates."""
+        mesh = load_mesh(simple_mesh_dir)
+
+        assert "lon_tri" in mesh
+        assert "lat_tri" in mesh
+        assert mesh.sizes["nelem"] == 2
 
     def test_minimal_mesh(self, minimal_mesh_dir):
         """Test loading minimal mesh without elements or depth."""
         mesh = load_mesh(minimal_mesh_dir)
 
-        assert mesh.n2d == 3
-        assert len(mesh.area) == 3
-        assert mesh.nlev == 1  # Default single level
+        assert mesh.sizes["npoints"] == 3
+        assert "area" in mesh
+        assert len(mesh["area"]) == 3
 
-    def test_repr(self, simple_mesh_dir):
-        """Test string representation."""
+    def test_mesh_metadata(self, simple_mesh_dir):
+        """Test nereus mesh metadata attributes."""
         mesh = load_mesh(simple_mesh_dir)
-        repr_str = repr(mesh)
 
-        assert "FesomMesh" in repr_str
-        assert "n2d=4" in repr_str
-        assert "nlev=2" in repr_str
+        assert mesh.attrs["nereus_mesh_type"] == "fesom"
+        assert "nereus_mesh_version" in mesh.attrs
+        assert mesh.attrs["nereus_dask_backend"] is False
 
     def test_mesh_not_found(self):
         """Test error when mesh files not found."""
         with pytest.raises(FileNotFoundError):
             load_mesh("/nonexistent/path")
 
+    def test_use_dask_explicit(self, simple_mesh_dir):
+        """Test explicit dask usage."""
+        # Force dask even for small mesh
+        mesh = load_mesh(simple_mesh_dir, use_dask=True)
 
-class TestFesomMeshBase:
-    """Tests for MeshBase interface methods in FesomMesh."""
+        assert mesh.attrs["nereus_dask_backend"] is True
 
-    def test_npoints(self, simple_mesh_dir):
-        """Test npoints property from MeshBase."""
-        mesh = load_mesh(simple_mesh_dir)
-        assert mesh.npoints == mesh.n2d
+    def test_lon_normalization(self, minimal_mesh_dir):
+        """Test longitude normalization to [-180, 180]."""
+        # Create mesh with lon > 180
+        with open(minimal_mesh_dir / "nod2d.out", "w") as f:
+            f.write("2\n")
+            f.write("1 270.0 0.0 0\n")  # 270 should become -90
+            f.write("2 0.0 0.0 0\n")
+
+        mesh = load_mesh(minimal_mesh_dir)
+        assert mesh["lon"].values[0] == pytest.approx(-90.0)
+
+
+class TestSpatialFunctions:
+    """Tests for standalone spatial functions with FESOM mesh."""
 
     def test_find_nearest_single(self, simple_mesh_dir):
         """Test finding single nearest point."""
         mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
 
         # Find nearest to (0.1, 0.1) - should be node 0 at (0, 0)
-        distances, indices = mesh.find_nearest(0.1, 0.1)
+        idx = nr.find_nearest(lon, lat, 0.1, 0.1)
 
-        assert indices.shape == (1,)
-        assert indices[0] == 0  # Closest to first node
+        assert idx == 0  # Closest to first node
+
+    def test_find_nearest_with_distance(self, simple_mesh_dir):
+        """Test finding nearest with distance."""
+        mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
+
+        idx, dist = nr.find_nearest(lon, lat, 0.0, 0.0, return_distance=True)
+
+        assert idx == 0
+        assert dist == pytest.approx(0.0, abs=1e-6)
 
     def test_find_nearest_multiple(self, simple_mesh_dir):
         """Test finding multiple nearest points."""
         mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
 
         # Find 2 nearest to (0.5, 0.5)
-        distances, indices = mesh.find_nearest(0.5, 0.5, k=2)
+        indices = nr.find_nearest(lon, lat, 0.5, 0.5, k=2)
 
-        assert indices.shape == (1, 2)
-        assert len(set(indices[0])) == 2  # Two different indices
+        assert len(indices) == 2
+        assert len(set(indices)) == 2  # Two different indices
 
     def test_find_nearest_array(self, simple_mesh_dir):
         """Test finding nearest for array of query points."""
         mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
 
         query_lon = np.array([0.0, 1.0])
         query_lat = np.array([0.0, 0.0])
 
-        distances, indices = mesh.find_nearest(query_lon, query_lat)
+        indices = nr.find_nearest(lon, lat, query_lon, query_lat)
 
         assert indices.shape == (2,)
         assert indices[0] == 0  # First query -> node 0
@@ -178,9 +223,11 @@ class TestFesomMeshBase:
     def test_subset_by_bbox(self, simple_mesh_dir):
         """Test bounding box subsetting."""
         mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
 
         # Select only left half
-        mask = mesh.subset_by_bbox(0.0, 0.75, -1.0, 2.0)
+        mask = nr.subset_by_bbox(lon, lat, 0.0, 0.75, -1.0, 2.0)
 
         assert mask.shape == (4,)
         assert mask.dtype == np.bool_
@@ -190,9 +237,57 @@ class TestFesomMeshBase:
     def test_subset_by_bbox_empty(self, simple_mesh_dir):
         """Test bbox subsetting with no points inside."""
         mesh = load_mesh(simple_mesh_dir)
+        lon = mesh["lon"].values
+        lat = mesh["lat"].values
 
-        mask = mesh.subset_by_bbox(100.0, 110.0, 0.0, 10.0)
+        mask = nr.subset_by_bbox(lon, lat, 100.0, 110.0, 0.0, 10.0)
         assert np.sum(mask) == 0
+
+
+class TestFesomFunctions:
+    """Tests for FESOM-specific functions."""
+
+    def test_node_to_element(self, simple_mesh_dir):
+        """Test node to element interpolation."""
+        from nereus.models.fesom import node_to_element
+
+        mesh = load_mesh(simple_mesh_dir)
+
+        # Create node data
+        node_data = np.array([1.0, 2.0, 3.0, 4.0])
+
+        elem_data = node_to_element(node_data, mesh)
+
+        assert elem_data.shape == (2,)  # 2 elements
+        # Element 0: nodes [0, 1, 2] with values [1, 2, 3] -> mean = 2
+        assert elem_data[0] == pytest.approx(2.0)
+        # Element 1: nodes [1, 3, 2] with values [2, 4, 3] -> mean = 3
+        assert elem_data[1] == pytest.approx(3.0)
+
+    def test_element_to_node(self, simple_mesh_dir):
+        """Test element to node interpolation."""
+        from nereus.models.fesom import element_to_node
+
+        mesh = load_mesh(simple_mesh_dir)
+
+        # Create element data
+        elem_data = np.array([1.0, 2.0])
+
+        node_data = element_to_node(elem_data, mesh)
+
+        assert node_data.shape == (4,)  # 4 nodes
+
+    def test_compute_element_centers(self, simple_mesh_dir):
+        """Test computing element centers."""
+        from nereus.models.fesom import compute_element_centers
+
+        # Create mesh without element centers
+        mesh_dir = simple_mesh_dir
+        mesh = load_mesh(mesh_dir)
+
+        # Element centers should already be computed by load_mesh
+        assert "lon_tri" in mesh
+        assert "lat_tri" in mesh
 
 
 class TestFesomDataset:
@@ -200,8 +295,72 @@ class TestFesomDataset:
 
     def test_open_dataset_without_mesh(self):
         """Test error when opening dataset without mesh."""
-        from nereus.models.fesom import open_dataset
-
         with tempfile.NamedTemporaryFile(suffix=".nc") as f:
             with pytest.raises(ValueError, match="Either mesh or mesh_path"):
                 open_dataset(f.name)
+
+
+class TestMeshValidation:
+    """Tests for mesh validation utilities."""
+
+    def test_is_nereus_mesh(self, simple_mesh_dir):
+        """Test nereus mesh detection."""
+        from nereus.core.mesh import is_nereus_mesh
+
+        mesh = load_mesh(simple_mesh_dir)
+        assert is_nereus_mesh(mesh) is True
+
+        # Regular dataset should not be nereus mesh
+        ds = xr.Dataset({"x": [1, 2, 3]})
+        assert is_nereus_mesh(ds) is False
+
+    def test_validate_mesh(self, simple_mesh_dir):
+        """Test mesh validation."""
+        from nereus.core.mesh import validate_mesh
+
+        mesh = load_mesh(simple_mesh_dir)
+        errors = validate_mesh(mesh)
+
+        assert errors == []  # No errors for valid mesh
+
+    def test_validate_mesh_missing_vars(self):
+        """Test validation catches missing variables."""
+        from nereus.core.mesh import validate_mesh
+
+        ds = xr.Dataset({"x": [1, 2, 3]})
+        errors = validate_mesh(ds)
+
+        assert len(errors) > 0
+        assert any("lon" in e for e in errors)
+
+    def test_validate_mesh_strict(self):
+        """Test strict validation raises error."""
+        from nereus.core.mesh import validate_mesh
+
+        ds = xr.Dataset({"x": [1, 2, 3]})
+
+        with pytest.raises(ValueError):
+            validate_mesh(ds, strict=True)
+
+
+class TestUniversalLoader:
+    """Tests for universal mesh loader."""
+
+    def test_load_mesh_fesom(self, simple_mesh_dir):
+        """Test universal loader with FESOM mesh."""
+        mesh = nr.load_mesh(simple_mesh_dir)
+
+        assert isinstance(mesh, xr.Dataset)
+        assert mesh.attrs["nereus_mesh_type"] == "fesom"
+
+    def test_load_mesh_explicit_type(self, simple_mesh_dir):
+        """Test universal loader with explicit type."""
+        mesh = nr.load_mesh(simple_mesh_dir, mesh_type="fesom")
+
+        assert mesh.attrs["nereus_mesh_type"] == "fesom"
+
+    def test_load_mesh_unknown_type(self):
+        """Test error for unknown mesh type."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError, match="Could not auto-detect"):
+                nr.load_mesh(tmpdir)

@@ -7,11 +7,23 @@ Examples
 --------
 >>> import nereus as nr
 
+# Load mesh (model-specific)
+>>> mesh = nr.fesom.load_mesh("/path/to/mesh")  # Returns xr.Dataset
+>>> mesh = nr.healpix.load_mesh(3145728)
+>>> mesh = nr.nemo.load_mesh("/path/to/mesh_mask.nc")
+
+# Universal loader with auto-detection
+>>> mesh = nr.load_mesh("/path/to/mesh")
+
+# Access mesh data
+>>> lon = mesh["lon"]  # xr.DataArray
+>>> area = mesh["area"].values  # numpy array
+
 # Plot unstructured data on a map
->>> fig, ax, interp = nr.plot(temperature, mesh.lon, mesh.lat)
+>>> fig, ax, interp = nr.plot(temperature, mesh["lon"].values, mesh["lat"].values)
 
 # Reuse interpolator for another variable
->>> fig, ax, _ = nr.plot(salinity, mesh.lon, mesh.lat, interpolator=interp)
+>>> fig, ax, _ = nr.plot(salinity, mesh["lon"].values, mesh["lat"].values, interpolator=interp)
 
 # Regrid data to regular grid
 >>> regridded, interp = nr.regrid(data, lon, lat, resolution=0.5)
@@ -20,14 +32,18 @@ Examples
 >>> fig, ax, interp = nr.plot(data, lon, lat, projection="npstere")
 
 # Compute sea ice diagnostics
->>> nh_ice_area = nr.ice_area_nh(sic, mesh.area, mesh.lat)
->>> sh_ice_extent = nr.ice_extent_sh(sic, mesh.area, mesh.lat)
->>> ice_vol = nr.ice_volume(sit, mesh.area, concentration=sic)
+>>> nh_ice_area = nr.ice_area(sic, mesh["area"], mask=mesh["lat"] > 0)
+>>> sh_ice_extent = nr.ice_extent(sic, mesh["area"], mask=mesh["lat"] < 0)
+>>> ice_vol = nr.ice_volume(sit, mesh["area"], concentration=sic)
+
+# Spatial queries
+>>> idx = nr.find_nearest(mesh["lon"].values, mesh["lat"].values, -30.5, 60.2)
+>>> mask = nr.subset_by_bbox(mesh["lon"].values, mesh["lat"].values, -10, 10, -5, 5)
 
 # Ocean diagnostics
->>> mean_sst = nr.surface_mean(sst, mesh.area)
->>> ohc = nr.heat_content(temp, mesh.area, mesh.layer_thickness)
->>> mean_temp = nr.volume_mean(temp, mesh.area, mesh.layer_thickness, depth_max=500)
+>>> mean_sst = nr.surface_mean(sst, mesh["area"])
+>>> ohc = nr.heat_content(temp, mesh["area"], mesh["layer_thickness"])
+>>> mean_temp = nr.volume_mean(temp, mesh["area"], mesh["layer_thickness"], depth_max=500)
 """
 
 from nereus._version import __version__
@@ -59,12 +75,36 @@ from nereus.diag import (
     volume_mean,
 )
 
+# Core utilities (exported at top level)
+from nereus.core.mesh import (
+    create_lonlat_mesh,
+    mesh_from_arrays,
+)
+from nereus.core.spatial import (
+    find_nearest,
+    haversine_distance,
+    points_in_polygon,
+    subset_by_bbox,
+)
+
 # Model-specific modules (as namespaces)
-from nereus.models import fesom, healpix, icona, icono, ifs
+from nereus.models import fesom, healpix, icona, icono, ifs, nemo
+
+# Universal mesh loader
+from nereus.models import load_mesh
 
 __all__ = [
     # Version
     "__version__",
+    # Mesh loading
+    "load_mesh",
+    "create_lonlat_mesh",
+    "mesh_from_arrays",
+    # Spatial queries
+    "find_nearest",
+    "subset_by_bbox",
+    "points_in_polygon",
+    "haversine_distance",
     # Regridding
     "RegridInterpolator",
     "regrid",
@@ -94,8 +134,9 @@ __all__ = [
     "load_geojson",
     # Model namespaces
     "fesom",
+    "healpix",
+    "nemo",
     "icono",
     "icona",
     "ifs",
-    "healpix",
 ]

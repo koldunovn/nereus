@@ -7,21 +7,37 @@ Examples
 --------
 >>> import nereus as nr
 
-# Load a FESOM mesh
+# Load a FESOM mesh (returns xr.Dataset)
 >>> mesh = nr.fesom.load_mesh("/path/to/mesh")
->>> print(f"Mesh has {mesh.n2d} nodes, {mesh.nlev} levels")
+>>> print(f"Mesh has {mesh.sizes['npoints']} nodes")
+
+# Access mesh data
+>>> lon = mesh["lon"]  # xr.DataArray
+>>> lon_np = mesh["lon"].values  # numpy array
+>>> area = mesh["area"]
+>>> triangles = mesh["triangles"]
 
 # Open data with mesh coordinates
 >>> ds = nr.fesom.open_dataset("temp.fesom.2010.nc", mesh=mesh)
 
+# Use with diagnostics
+>>> ice_area = nr.ice_area(sic, mesh["area"], mask=mesh["lat"] > 0)
+
 # Use with plotting
->>> fig, ax, _ = nr.plot(ds.temp[0, 0, :], mesh.lon, mesh.lat)
+>>> fig, ax, _ = nr.plot(ds.temp[0, 0, :], mesh["lon"].values, mesh["lat"].values)
 """
 
-from nereus.models.fesom.mesh import FesomMesh, load_mesh, open_dataset
+from nereus.models.fesom.functions import (
+    compute_element_centers,
+    element_to_node,
+    node_to_element,
+)
+from nereus.models.fesom.mesh import load_mesh, open_dataset
 
 __all__ = [
-    "FesomMesh",
+    "compute_element_centers",
+    "element_to_node",
     "load_mesh",
+    "node_to_element",
     "open_dataset",
 ]

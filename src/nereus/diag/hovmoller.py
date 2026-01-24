@@ -76,6 +76,54 @@ def _lat_bin_chunk(
     return result
 
 
+def _lat_bin_single_time(
+    data_row: NDArray,
+    area_1d: NDArray,
+    bin_indices: NDArray,
+    nlat: int,
+) -> NDArray:
+    """Process a single time step for latitude binning.
+
+    Parameters
+    ----------
+    data_row : ndarray
+        Data for single time step with shape (npoints,).
+    area_1d : ndarray
+        Area weights with shape (npoints,).
+    bin_indices : ndarray
+        Precomputed bin index for each point, shape (npoints,).
+    nlat : int
+        Number of latitude bins.
+
+    Returns
+    -------
+    ndarray
+        Binned results with shape (nlat,).
+    """
+    result = np.full(nlat, np.nan)
+
+    for i in range(nlat):
+        in_bin = bin_indices == i
+        if not np.any(in_bin):
+            continue
+
+        # Extract data for this bin
+        bin_data = data_row[in_bin]
+        bin_area = area_1d[in_bin]
+
+        # Compute valid mask
+        valid = np.isfinite(bin_data)
+        valid_area = np.where(valid, bin_area, 0.0)
+        total_area = np.sum(valid_area)
+
+        if total_area > 0:
+            data_filled = np.where(valid, bin_data, 0.0)
+            weighted_sum = np.sum(data_filled * valid_area)
+            result[i] = weighted_sum / total_area
+
+    return result
+
+
 def hovmoller(
     data: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
@@ -304,19 +352,29 @@ def hovmoller(
         # Process using dask or numpy
         if is_lazy:
             import dask.array as da
+            from functools import partial
 
-            # Use map_blocks to process each time chunk lazily
-            # The function processes (chunk_ntime, npoints) -> (chunk_ntime, nlat)
-            result = da.map_blocks(
-                _lat_bin_chunk,
+            # Convert area and bin_indices to dask arrays with single chunk
+            # This prevents them from being embedded in every task (graph bloat)
+            area_da = da.from_array(area_1d, chunks=-1)
+            bin_da = da.from_array(bin_indices, chunks=-1)
+
+            # Bind nlat using partial
+            lat_bin_func = partial(_lat_bin_single_time, nlat=nlat)
+
+            # Use apply_gufunc to process each time step
+            # Signature: (npoints),(npoints),(npoints)->(nlat)
+            # This vectorizes over the time dimension
+            result = da.apply_gufunc(
+                lat_bin_func,
+                "(p),(p),(p)->(n)",
                 data_2d,
-                area_1d=area_1d,
-                bin_indices=bin_indices,
-                nlat=nlat,
-                dtype=np.float64,
-                drop_axis=1,
-                new_axis=1,
-                chunks=(data_2d.chunks[0], (nlat,)),
+                area_da,
+                bin_da,
+                output_sizes={"n": nlat},
+                output_dtypes=[np.float64],
+                vectorize=True,
+                allow_rechunk=True,
             )
         else:
             # Numpy path

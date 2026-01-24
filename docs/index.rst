@@ -20,7 +20,7 @@ Key Features
 
 - **Fast regridding** from unstructured to regular grids using KD-tree based nearest neighbor interpolation
 - **Interactive plotting** with Cartopy projections for quick data visualization
-- **Model-specific support** for FESOM2, ICON, IFS, and HEALPix grids
+- **Model-specific support** for FESOM2, ICON, IFS TCO, and HEALPix grids
 - **Diagnostic functions** for sea ice, ocean heat content, and Hovmoller diagrams
 - **Dask integration** for efficient handling of large datasets
 - **Automatic caching** of interpolation weights for repeated operations

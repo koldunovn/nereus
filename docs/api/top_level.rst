@@ -97,6 +97,7 @@ Access model-specific functionality through these namespaces:
 * ``nr.fesom`` - FESOM2 ocean model (:doc:`models`)
 * ``nr.healpix`` - HEALPix grids (:doc:`models`)
 * ``nr.nemo`` - NEMO ocean model (:doc:`models`)
+* ``nr.ifs_tco`` - IFS TCO mesh (:doc:`models`)
 * ``nr.icono`` - ICON-Ocean model (planned)
 * ``nr.icona`` - ICON-Atmosphere model (planned)
 * ``nr.ifs`` - IFS/ECMWF model (planned)

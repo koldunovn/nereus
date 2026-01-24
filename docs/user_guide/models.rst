@@ -81,6 +81,9 @@ Supported Models
    * - ``nr.nemo``
      - NEMO
      - Fully implemented
+   * - ``nr.ifs_tco``
+     - IFS TCO
+     - Fully implemented
    * - ``nr.icono``
      - ICON-Ocean
      - Planned
@@ -296,6 +299,27 @@ Loading a NEMO Mesh
 
    # Original 2D shape is stored in attributes
    print(f"Original shape: {mesh.attrs['nlon']} x {mesh.attrs['nlat']}")
+
+IFS TCO
+-------
+
+IFS TCO meshes use separate grid and area files with ``A*`` variables for
+longitude, latitude, and cell surface area.
+
+Loading an IFS TCO Mesh
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import nereus as nr
+
+   mesh = nr.ifs_tco.load_mesh(
+       "/path/to/tco_grid.nc",
+       "/path/to/tco_areas.nc",
+   )
+
+   print(mesh.sizes["npoints"])
+   print(mesh["lon"].values[:5])
 
 Universal Mesh Loader
 ---------------------

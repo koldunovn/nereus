@@ -3,11 +3,8 @@
 This module provides functions for computing and plotting Hovmoller diagrams
 (time-depth or time-latitude plots).
 
-The hovmoller function is dask-friendly for mode="depth": if inputs are dask
-arrays, the result will be lazy dask arrays.
-
-For mode="latitude", dask arrays will be computed eagerly due to the binning
-operation.
+The hovmoller function is dask-friendly: if inputs are dask arrays, the result
+will be lazy dask arrays for both mode="depth" and mode="latitude".
 """
 
 from __future__ import annotations
@@ -27,6 +24,58 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
 
+def _lat_bin_chunk(
+    data_chunk: NDArray,
+    area_1d: NDArray,
+    bin_indices: NDArray,
+    nlat: int,
+) -> NDArray:
+    """Process a chunk of time steps for latitude binning.
+
+    Parameters
+    ----------
+    data_chunk : ndarray
+        Data chunk with shape (ntime_chunk, npoints).
+    area_1d : ndarray
+        Area weights with shape (npoints,).
+    bin_indices : ndarray
+        Precomputed bin index for each point, shape (npoints,).
+    nlat : int
+        Number of latitude bins.
+
+    Returns
+    -------
+    ndarray
+        Binned results with shape (ntime_chunk, nlat).
+    """
+    ntime_chunk = data_chunk.shape[0]
+    result = np.full((ntime_chunk, nlat), np.nan)
+
+    for i in range(nlat):
+        in_bin = bin_indices == i
+        if not np.any(in_bin):
+            continue
+
+        # Extract data for this bin
+        bin_data = data_chunk[:, in_bin]  # (ntime_chunk, npoints_in_bin)
+        bin_area = area_1d[in_bin]
+
+        # Compute valid mask
+        valid = np.isfinite(bin_data)
+        valid_area = np.where(valid, bin_area[np.newaxis, :], 0.0)
+        total_area = np.sum(valid_area, axis=1)
+
+        # Weighted sum
+        data_filled = np.where(valid, bin_data, 0.0)
+        weighted_sum = np.sum(data_filled * valid_area, axis=1)
+
+        # Mean
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result[:, i] = np.where(total_area > 0, weighted_sum / total_area, np.nan)
+
+    return result
+
+
 def hovmoller(
     data: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
@@ -43,11 +92,8 @@ def hovmoller(
     Computes area-weighted means at each time step, binned by either depth
     level or latitude.
 
-    For mode="depth", this function is dask-friendly: if inputs are dask
-    arrays, the result will be lazy dask arrays.
-
-    For mode="latitude", dask arrays will be computed eagerly due to the
-    binning operation.
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be lazy dask arrays.
 
     Parameters
     ----------
@@ -202,20 +248,7 @@ def hovmoller(
         if lat is None:
             raise ValueError("lat array required for mode='latitude'")
 
-        # For latitude mode, we need eager computation due to binning
-        # Force computation if dask
-        if is_lazy:
-            if hasattr(data_arr, "compute"):
-                data_arr = data_arr.compute()
-            else:
-                data_arr = np.asarray(data_arr)
-            if hasattr(area_arr, "compute"):
-                area_arr = area_arr.compute()
-            else:
-                area_arr = np.asarray(area_arr)
-
-        data_arr = np.asarray(data_arr)
-        area_arr = np.asarray(area_arr)
+        # Get lat array as numpy (small array, safe to compute)
         lat_arr = np.asarray(get_array_data(lat)).ravel()
 
         # Set up latitude bins
@@ -225,7 +258,13 @@ def hovmoller(
         lat_centers = 0.5 * (lat_bins[:-1] + lat_bins[1:])
         nlat = len(lat_centers)
 
-        # Handle data shape
+        # Precompute bin indices for each point (small numpy array)
+        # digitize returns 1-based indices for bins, so subtract 1
+        # Points outside the range get clipped to valid bin indices
+        bin_indices = np.digitize(lat_arr, lat_bins) - 1
+        bin_indices = np.clip(bin_indices, 0, nlat - 1)
+
+        # Handle data shape - need to work with original array (possibly dask)
         if data_arr.ndim == 1:
             # Single timestep, single level (npoints,)
             data_arr = data_arr[np.newaxis, np.newaxis, :]
@@ -238,6 +277,9 @@ def hovmoller(
         npoints = data_arr.shape[-1]
 
         # For latitude mode, use surface area (first level if 2D)
+        # Area needs to be numpy for the binning function
+        if is_dask_array(area_arr):
+            area_arr = np.asarray(area_arr)
         if area_arr.ndim == 2:
             area_1d = area_arr[0, :]
         else:
@@ -247,27 +289,68 @@ def hovmoller(
         if horiz_mask is not None:
             area_1d = np.where(horiz_mask, area_1d, 0.0)
 
-        # Compute area-weighted mean in each latitude bin
         # Vertically integrate first if 3D
         if data_arr.shape[1] > 1:
             # Vertical mean (simple average across levels)
-            data_2d = np.nanmean(data_arr, axis=1)
+            if is_lazy:
+                import dask.array as da
+
+                data_2d = da.nanmean(data_arr, axis=1)
+            else:
+                data_2d = np.nanmean(data_arr, axis=1)
         else:
             data_2d = data_arr[:, 0, :]
 
-        result = np.zeros((ntime, nlat))
-        for t in range(ntime):
-            for i in range(nlat):
-                in_bin = (lat_arr >= lat_bins[i]) & (lat_arr < lat_bins[i + 1])
-                layer_data = data_2d[t, in_bin]
-                bin_area = area_1d[in_bin]
-                valid = np.isfinite(layer_data)
-                valid_area = np.where(valid, bin_area, 0.0)
-                total_area = np.sum(valid_area)
-                if total_area > 0:
-                    result[t, i] = np.nansum(layer_data * valid_area) / total_area
-                else:
-                    result[t, i] = np.nan
+        # Process using dask or numpy
+        if is_lazy:
+            import dask.array as da
+
+            # Try to use distributed client.scatter to avoid graph bloat
+            # This sends the arrays to workers once, then tasks reference by future
+            use_scatter = False
+            try:
+                from distributed import get_client
+
+                client = get_client()
+                # Scatter arrays to all workers (broadcast=True)
+                area_future = client.scatter(area_1d, broadcast=True)
+                bin_future = client.scatter(bin_indices, broadcast=True)
+                use_scatter = True
+            except (ImportError, ValueError):
+                # No distributed client available, use regular approach
+                pass
+
+            if use_scatter:
+                # With scattered data, use map_blocks with futures
+                result = da.map_blocks(
+                    _lat_bin_chunk,
+                    data_2d,
+                    area_1d=area_future,
+                    bin_indices=bin_future,
+                    nlat=nlat,
+                    dtype=np.float64,
+                    drop_axis=1,
+                    new_axis=1,
+                    chunks=(data_2d.chunks[0], (nlat,)),
+                )
+            else:
+                # Fallback: use map_blocks with embedded arrays
+                # This works fine for local schedulers
+                result = da.map_blocks(
+                    _lat_bin_chunk,
+                    data_2d,
+                    area_1d=area_1d,
+                    bin_indices=bin_indices,
+                    nlat=nlat,
+                    dtype=np.float64,
+                    drop_axis=1,
+                    new_axis=1,
+                    chunks=(data_2d.chunks[0], (nlat,)),
+                )
+        else:
+            # Numpy path
+            data_2d = np.asarray(data_2d)
+            result = _lat_bin_chunk(data_2d, area_1d, bin_indices, nlat)
 
         # Time array
         if time is None:

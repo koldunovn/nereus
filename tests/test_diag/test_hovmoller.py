@@ -499,8 +499,8 @@ class TestDaskCompatibility:
         # Mean = (20*0.5e6 + 20*1e6) / 1.5e6 = 20
         assert result_computed[0, 1] == pytest.approx(20.0)
 
-    def test_hovmoller_latitude_mode_dask_computes_eagerly(self, dask_deps):
-        """Test that latitude mode computes dask arrays eagerly."""
+    def test_hovmoller_latitude_mode_dask(self, dask_deps):
+        """Test that latitude mode is dask-friendly."""
         da, xr = dask_deps
 
         # Create dask-backed data
@@ -520,9 +520,47 @@ class TestDaskCompatibility:
             data, area_np, lat=lat_np, mode="latitude"
         )
 
-        # Latitude mode should return numpy array (eager computation)
-        assert not is_dask_array(result)
-        assert isinstance(result, np.ndarray)
+        # Latitude mode is now dask-friendly (returns lazy dask array)
+        assert is_dask_array(result)
+
+        # Verify result after computing
+        result_computed = result.compute()
+        assert isinstance(result_computed, np.ndarray)
+        assert result_computed.shape[0] == 2  # ntime
+
+    def test_hovmoller_latitude_mode_dask_values(self, dask_deps):
+        """Test that dask latitude mode produces same results as numpy."""
+        da, xr = dask_deps
+
+        # Create test data with known values
+        data_np = np.array([
+            [10.0, 20.0, 30.0, 40.0],
+            [11.0, 21.0, 31.0, 41.0],
+        ])
+        area_np = np.array([1e6, 1e6, 1e6, 1e6])
+        lat_np = np.array([-45.0, -15.0, 15.0, 45.0])
+        lat_bins = np.array([-60, -30, 0, 30, 60])
+
+        # Compute with numpy input
+        _, _, result_numpy = hovmoller(
+            data_np, area_np, lat=lat_np, mode="latitude", lat_bins=lat_bins
+        )
+
+        # Compute with dask input
+        data_dask = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 4)),
+            dims=["time", "npoints"],
+        )
+        _, _, result_dask = hovmoller(
+            data_dask, area_np, lat=lat_np, mode="latitude", lat_bins=lat_bins
+        )
+
+        # Verify dask returns lazy array
+        assert is_dask_array(result_dask)
+
+        # Results should match
+        result_computed = result_dask.compute()
+        np.testing.assert_allclose(result_computed, result_numpy, rtol=1e-10)
 
     def test_numpy_input_returns_numpy(self, dask_deps):
         """Test that numpy input returns numpy result."""

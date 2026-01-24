@@ -125,6 +125,23 @@ The NEMO mesh loader expects a ``mesh_mask.nc`` file and flattens 2D coordinates
 to 1D for compatibility with nereus functions. Original 2D shape information is
 preserved in mesh attributes.
 
+IFS TCO
+-------
+
+.. automodule:: nereus.models.ifs_tco
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+IFS TCO Mesh Loading
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.ifs_tco.load_mesh
+
+The IFS TCO mesh loader expects separate grid and area NetCDF files. It selects
+the ``A*`` prefix for ``lon``/``lat`` and ``A*.srf`` for area, then flattens the
+coordinates to a 1D mesh compatible with nereus utilities.
+
 ICON-Ocean (Planned)
 --------------------
 

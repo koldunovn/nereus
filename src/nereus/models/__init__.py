@@ -9,6 +9,7 @@ Available submodules:
 - icono: ICON-Ocean model support (stub)
 - icona: ICON-Atmosphere model support (stub)
 - ifs: IFS model support (stub)
+- ifs_tco: IFS TCO mesh support
 
 Universal loader:
 - load_mesh: Auto-detect mesh type and load
@@ -32,7 +33,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from nereus.models import fesom, healpix, icona, icono, ifs, nemo
+from nereus.models import fesom, healpix, icona, icono, ifs, ifs_tco, nemo
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -98,7 +99,7 @@ def detect_mesh_type(path: str | os.PathLike) -> str:
 def load_mesh(
     path: str | os.PathLike | int,
     *,
-    mesh_type: Literal["fesom", "healpix", "nemo", "auto"] | None = None,
+    mesh_type: Literal["fesom", "healpix", "nemo", "ifs_tco", "auto"] | None = None,
     use_dask: bool | None = None,
     **kwargs,
 ) -> "xr.Dataset":
@@ -109,7 +110,7 @@ def load_mesh(
     path : str, Path, or int
         Path to mesh directory/file, or number of points for HEALPix.
     mesh_type : str, optional
-        Mesh type: "fesom", "healpix", "nemo", or "auto".
+        Mesh type: "fesom", "healpix", "nemo", "ifs_tco", or "auto".
         If None or "auto", attempts to auto-detect.
     use_dask : bool, optional
         Whether to use dask arrays. Auto-detects if None.
@@ -156,6 +157,8 @@ def load_mesh(
         return fesom.load_mesh(path, use_dask=use_dask, **kwargs)
     elif mesh_type == "nemo":
         return nemo.load_mesh(path, use_dask=use_dask, **kwargs)
+    elif mesh_type == "ifs_tco":
+        return ifs_tco.load_mesh(path, use_dask=use_dask, **kwargs)
     elif mesh_type == "healpix":
         raise ValueError("HEALPix meshes require npoints (int), not a path")
     else:
@@ -169,6 +172,7 @@ __all__ = [
     "icona",
     "icono",
     "ifs",
+    "ifs_tco",
     "load_mesh",
     "nemo",
 ]

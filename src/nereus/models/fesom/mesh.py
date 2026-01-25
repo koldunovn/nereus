@@ -116,13 +116,15 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
         "nod_n": "npoints",
     }
 
-    # Copy all original variables
+    # Copy all original variables (preserve dask arrays if enabled)
     for var_name in ds_orig.data_vars:
         var = ds_orig[var_name]
         # Rename dimensions according to map
         new_dims = tuple(dim_map.get(d, d) for d in var.dims)
+        # Use .data to preserve dask arrays, .values would force computation
+        var_data = var.data if use_dask_actual else var.values
         ds[var_name] = xr.DataArray(
-            var.values,
+            var_data,
             dims=new_dims,
             attrs=var.attrs,
         )
@@ -131,8 +133,9 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
     for coord_name in ds_orig.coords:
         coord = ds_orig[coord_name]
         new_dims = tuple(dim_map.get(d, d) for d in coord.dims)
+        coord_data = coord.data if use_dask_actual else coord.values
         ds.coords[coord_name] = xr.DataArray(
-            coord.values,
+            coord_data,
             dims=new_dims if new_dims else (coord_name,),
             attrs=coord.attrs,
         )
@@ -178,13 +181,20 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
             break
 
     if area_var:
-        area_raw = ds_orig[area_var].values
+        # Use .data to preserve dask arrays if enabled
+        area_raw = ds_orig[area_var].data if use_dask_actual else ds_orig[area_var].values
         # nod_area may have shape (nz, nod2) - use surface level for area
         if area_raw.ndim == 2:
             area_data = area_raw[0, :]  # Surface level
             # Create 3D nod_area with NaN where area == 0 (below bottom/land)
-            nod_area_nans = area_raw.astype(np.float64, copy=True)
-            nod_area_nans[nod_area_nans == 0] = np.nan
+            if use_dask_actual:
+                import dask.array as da
+                # Use da.where to replace zeros with NaN (lazy operation)
+                nod_area_nans = da.where(area_raw == 0, np.nan, area_raw.astype(np.float64))
+            else:
+                nod_area_nans = area_raw.astype(np.float64, copy=True)
+                nod_area_nans[nod_area_nans == 0] = np.nan
+
             ds["nod_area_nans"] = xr.DataArray(
                 nod_area_nans,
                 dims=("nz", "npoints"),
@@ -196,10 +206,6 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
             )
         else:
             area_data = area_raw
-
-        if use_dask_actual:
-            import dask.array as da
-            area_data = da.from_array(area_data, chunks=-1)
 
         ds["area"] = xr.DataArray(
             area_data,

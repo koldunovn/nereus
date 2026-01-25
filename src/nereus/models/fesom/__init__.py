@@ -30,6 +30,7 @@ Examples
 from nereus.models.fesom.functions import (
     compute_element_centers,
     element_to_node,
+    mask_by_depth,
     node_to_element,
 )
 from nereus.models.fesom.mesh import load_mesh, open_dataset
@@ -38,6 +39,7 @@ __all__ = [
     "compute_element_centers",
     "element_to_node",
     "load_mesh",
+    "mask_by_depth",
     "node_to_element",
     "open_dataset",
 ]

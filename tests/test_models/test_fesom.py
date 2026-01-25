@@ -364,3 +364,99 @@ class TestUniversalLoader:
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(ValueError, match="Could not auto-detect"):
                 nr.load_mesh(tmpdir)
+
+
+class TestMaskByDepth:
+    """Tests for mask_by_depth function."""
+
+    def test_mask_by_depth_2d(self):
+        """Test masking 2D data (single level)."""
+        from nereus.models.fesom import mask_by_depth
+
+        # Create test data: 5 points
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        # Mask: points 2 and 4 are invalid (below bottom)
+        mask = np.array([True, True, False, True, False])
+
+        result = mask_by_depth(data, mask)
+
+        assert result.shape == (5,)
+        assert result[0] == 1.0
+        assert result[1] == 2.0
+        assert np.isnan(result[2])
+        assert result[3] == 4.0
+        assert np.isnan(result[4])
+
+    def test_mask_by_depth_3d(self):
+        """Test masking 3D data (multiple levels)."""
+        from nereus.models.fesom import mask_by_depth
+
+        # Create test data: 3 levels, 4 points
+        data = np.array([
+            [1.0, 2.0, 3.0, 4.0],  # Level 0
+            [5.0, 6.0, 7.0, 8.0],  # Level 1
+            [9.0, 10.0, 11.0, 12.0],  # Level 2
+        ])
+        # Mask: progressive bottom - point 3 ends at level 1, point 4 ends at level 0
+        mask = np.array([
+            [True, True, True, True],   # Level 0: all valid
+            [True, True, True, False],  # Level 1: point 4 below bottom
+            [True, True, False, False],  # Level 2: points 3,4 below bottom
+        ])
+
+        result = mask_by_depth(data, mask)
+
+        assert result.shape == (3, 4)
+        # Level 0: all valid
+        np.testing.assert_array_equal(result[0, :], [1.0, 2.0, 3.0, 4.0])
+        # Level 1: point 4 masked
+        assert result[1, 0] == 5.0
+        assert result[1, 1] == 6.0
+        assert result[1, 2] == 7.0
+        assert np.isnan(result[1, 3])
+        # Level 2: points 3,4 masked
+        assert result[2, 0] == 9.0
+        assert result[2, 1] == 10.0
+        assert np.isnan(result[2, 2])
+        assert np.isnan(result[2, 3])
+
+    def test_mask_by_depth_xarray(self):
+        """Test masking works with xarray DataArrays."""
+        from nereus.models.fesom import mask_by_depth
+
+        data = xr.DataArray(
+            np.array([1.0, 2.0, 3.0]),
+            dims=("npoints",)
+        )
+        mask = xr.DataArray(
+            np.array([True, False, True]),
+            dims=("npoints",)
+        )
+
+        result = mask_by_depth(data, mask)
+
+        assert isinstance(result, np.ndarray)
+        assert result[0] == 1.0
+        assert np.isnan(result[1])
+        assert result[2] == 3.0
+
+    def test_mask_by_depth_shape_mismatch(self):
+        """Test error on shape mismatch."""
+        from nereus.models.fesom import mask_by_depth
+
+        data = np.array([1.0, 2.0, 3.0])
+        mask = np.array([True, False])  # Wrong size
+
+        with pytest.raises(ValueError, match="does not match mask shape"):
+            mask_by_depth(data, mask)
+
+    def test_mask_by_depth_preserves_dtype(self):
+        """Test that result is float64 to support NaN."""
+        from nereus.models.fesom import mask_by_depth
+
+        data = np.array([1, 2, 3], dtype=np.int32)
+        mask = np.array([True, False, True])
+
+        result = mask_by_depth(data, mask)
+
+        assert result.dtype == np.float64

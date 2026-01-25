@@ -80,6 +80,8 @@ FESOM2 Functions
 
 .. autofunction:: nereus.models.fesom.element_to_node
 
+.. autofunction:: nereus.models.fesom.mask_by_depth
+
 .. autofunction:: nereus.models.fesom.open_dataset
 
 HEALPix

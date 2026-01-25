@@ -182,14 +182,16 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
         # nod_area may have shape (nz, nod2) - use surface level for area
         if area_raw.ndim == 2:
             area_data = area_raw[0, :]  # Surface level
-            # Create 3D mask: True where area > 0 (valid ocean cells)
-            nod_area_mask = area_raw > 0
-            ds["nod_area_mask"] = xr.DataArray(
-                nod_area_mask,
+            # Create 3D nod_area with NaN where area == 0 (below bottom/land)
+            nod_area_nans = area_raw.astype(np.float64, copy=True)
+            nod_area_nans[nod_area_nans == 0] = np.nan
+            ds["nod_area_nans"] = xr.DataArray(
+                nod_area_nans,
                 dims=("nz", "npoints"),
                 attrs={
-                    "long_name": "Node area mask (True=valid ocean cell)",
-                    "comment": "Derived from nod_area > 0",
+                    "units": "m2",
+                    "long_name": "Node cluster area (3D, NaN below bottom)",
+                    "comment": "Derived from nod_area with zeros replaced by NaN",
                 },
             )
         else:
@@ -209,21 +211,6 @@ def _load_from_netcdf(filepath: Path, use_dask: bool | None = None) -> xr.Datase
         )
     else:
         area_data = None
-
-    # --- Element area and 3D mask ---
-    if "elem_area" in ds_orig:
-        elem_area_raw = ds_orig["elem_area"].values
-        if elem_area_raw.ndim == 2:
-            # 3D elem_area: create mask
-            elem_area_mask = elem_area_raw > 0
-            ds["elem_area_mask"] = xr.DataArray(
-                elem_area_mask,
-                dims=("nz", "nelem"),
-                attrs={
-                    "long_name": "Element area mask (True=valid ocean cell)",
-                    "comment": "Derived from elem_area > 0",
-                },
-            )
 
     # --- Standardized triangles (0-indexed, shape nelem x 3) ---
     tri_var = None
@@ -493,8 +480,8 @@ def _load_from_ascii(mesh_dir: Path, use_dask: bool | None = None) -> xr.Dataset
         )
 
     # --- Compute area from triangles ---
-    # Note: ASCII meshes don't have 3D nod_area/elem_area, so no depth masks.
-    # Use NetCDF mesh loader if you need nod_area_mask/elem_area_mask.
+    # Note: ASCII meshes don't have 3D nod_area, so nod_area_nans is not available.
+    # Use NetCDF mesh loader if you need nod_area_nans for depth masking.
     area_data = None
     if tri_data is not None:
         # Compute from triangles

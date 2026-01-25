@@ -375,10 +375,10 @@ class TestMaskByDepth:
 
         # Create test data: 5 points
         data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        # Mask: points 2 and 4 are invalid (below bottom)
-        mask = np.array([True, True, False, True, False])
+        # nod_area_nans: points 2 and 4 are invalid (NaN = below bottom)
+        nod_area_nans = np.array([100.0, 100.0, np.nan, 100.0, np.nan])
 
-        result = mask_by_depth(data, mask)
+        result = mask_by_depth(data, nod_area_nans)
 
         assert result.shape == (5,)
         assert result[0] == 1.0
@@ -397,14 +397,14 @@ class TestMaskByDepth:
             [5.0, 6.0, 7.0, 8.0],  # Level 1
             [9.0, 10.0, 11.0, 12.0],  # Level 2
         ])
-        # Mask: progressive bottom - point 3 ends at level 1, point 4 ends at level 0
-        mask = np.array([
-            [True, True, True, True],   # Level 0: all valid
-            [True, True, True, False],  # Level 1: point 4 below bottom
-            [True, True, False, False],  # Level 2: points 3,4 below bottom
+        # nod_area_nans: progressive bottom - point 3 ends at level 1, point 4 ends at level 0
+        nod_area_nans = np.array([
+            [100.0, 100.0, 100.0, 100.0],   # Level 0: all valid
+            [100.0, 100.0, 100.0, np.nan],  # Level 1: point 4 below bottom
+            [100.0, 100.0, np.nan, np.nan],  # Level 2: points 3,4 below bottom
         ])
 
-        result = mask_by_depth(data, mask)
+        result = mask_by_depth(data, nod_area_nans)
 
         assert result.shape == (3, 4)
         # Level 0: all valid
@@ -428,12 +428,12 @@ class TestMaskByDepth:
             np.array([1.0, 2.0, 3.0]),
             dims=("npoints",)
         )
-        mask = xr.DataArray(
-            np.array([True, False, True]),
+        nod_area_nans = xr.DataArray(
+            np.array([100.0, np.nan, 100.0]),
             dims=("npoints",)
         )
 
-        result = mask_by_depth(data, mask)
+        result = mask_by_depth(data, nod_area_nans)
 
         assert isinstance(result, np.ndarray)
         assert result[0] == 1.0
@@ -445,18 +445,18 @@ class TestMaskByDepth:
         from nereus.models.fesom import mask_by_depth
 
         data = np.array([1.0, 2.0, 3.0])
-        mask = np.array([True, False])  # Wrong size
+        nod_area_nans = np.array([100.0, np.nan])  # Wrong size
 
-        with pytest.raises(ValueError, match="does not match mask shape"):
-            mask_by_depth(data, mask)
+        with pytest.raises(ValueError, match="does not match nod_area_nans shape"):
+            mask_by_depth(data, nod_area_nans)
 
     def test_mask_by_depth_preserves_dtype(self):
         """Test that result is float64 to support NaN."""
         from nereus.models.fesom import mask_by_depth
 
         data = np.array([1, 2, 3], dtype=np.int32)
-        mask = np.array([True, False, True])
+        nod_area_nans = np.array([100.0, np.nan, 100.0])
 
-        result = mask_by_depth(data, mask)
+        result = mask_by_depth(data, nod_area_nans)
 
         assert result.dtype == np.float64

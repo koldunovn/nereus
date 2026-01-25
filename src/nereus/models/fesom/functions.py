@@ -235,51 +235,50 @@ def element_to_node(
 
 def mask_by_depth(
     data: xr.DataArray | NDArray[np.floating],
-    mask: xr.DataArray | NDArray[np.bool_],
+    nod_area_nans: xr.DataArray | NDArray[np.floating],
 ) -> NDArray[np.floating]:
     """Apply depth mask to data, setting invalid cells to NaN.
 
-    This function masks ocean data based on bottom topography. Use with
-    nod_area_mask (for node-based variables) or elem_area_mask (for
-    element-based variables) from the FESOM mesh.
+    This function masks ocean data based on bottom topography using
+    ``nod_area_nans`` from the FESOM mesh, which contains NaN for cells
+    below the ocean floor.
 
     Parameters
     ----------
     data : xr.DataArray or ndarray
         Data to mask. Can be:
-        - 2D array (nz, npoints) or (nz, nelem) for 3D fields
-        - 1D array (npoints,) or (nelem,) for 2D fields at a single level
-    mask : xr.DataArray or ndarray
-        Boolean mask where True = valid ocean cell, False = below bottom/land.
-        Can be:
-        - Full 3D mask (nz, npoints) or (nz, nelem) - must match data shape
-        - Single level 1D mask (npoints,) or (nelem,) - for 2D data
+        - 2D array (nz, npoints) for 3D fields
+        - 1D array (npoints,) for 2D fields at a single level
+    nod_area_nans : xr.DataArray or ndarray
+        3D node area array with NaN where cells are below bottom/land.
+        Use ``mesh.nod_area_nans`` or a slice of it (e.g., ``mesh.nod_area_nans[10, :]``).
+        Must match data shape.
 
     Returns
     -------
     ndarray
-        Masked data as numpy array with NaN where mask is False.
+        Masked data as numpy array with NaN where nod_area_nans is NaN.
         Returns float64 to support NaN values.
 
     Examples
     --------
     >>> mesh = nr.fesom.load_mesh(path)
     >>> # Mask 3D temperature field
-    >>> temp_masked = nr.fesom.mask_by_depth(temp_3d, mesh.nod_area_mask)
+    >>> temp_masked = nr.fesom.mask_by_depth(temp_3d, mesh.nod_area_nans)
     >>>
     >>> # Mask single level (e.g., level 10)
     >>> temp_lev10_masked = nr.fesom.mask_by_depth(
-    ...     temp_3d[10, :], mesh.nod_area_mask[10, :]
+    ...     temp_3d[10, :], mesh.nod_area_nans[10, :]
     ... )
-    >>>
-    >>> # For element-based data (e.g., velocity)
-    >>> u_masked = nr.fesom.mask_by_depth(u_3d, mesh.elem_area_mask)
 
     Notes
     -----
     The function is dimension-name-agnostic - it works purely by array shape.
     This avoids issues with inconsistent dimension names across different
     FESOM output files (nod2, npoints, ncells, etc.).
+
+    For volume computations, you can use ``nod_area_nans`` directly since it
+    already contains the area values with NaN for invalid cells.
     """
     # Convert to numpy arrays
     if hasattr(data, "values"):
@@ -287,23 +286,22 @@ def mask_by_depth(
     else:
         data_np = np.asarray(data)
 
-    if hasattr(mask, "values"):
-        mask_np = mask.values
+    if hasattr(nod_area_nans, "values"):
+        area_np = nod_area_nans.values
     else:
-        mask_np = np.asarray(mask)
+        area_np = np.asarray(nod_area_nans)
 
     # Validate shapes match
-    if data_np.shape != mask_np.shape:
+    if data_np.shape != area_np.shape:
         raise ValueError(
-            f"Data shape {data_np.shape} does not match mask shape {mask_np.shape}. "
-            "Ensure you're using the correct mask (nod_area_mask for node data, "
-            "elem_area_mask for element data) and matching depth levels."
+            f"Data shape {data_np.shape} does not match nod_area_nans shape {area_np.shape}. "
+            "Ensure you're using the correct depth levels."
         )
 
     # Create output array (float64 to support NaN)
     result = data_np.astype(np.float64, copy=True)
 
-    # Apply mask: set False locations to NaN
-    result[~mask_np] = np.nan
+    # Apply mask: set NaN locations in area to NaN in result
+    result[np.isnan(area_np)] = np.nan
 
     return result

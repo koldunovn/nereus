@@ -61,6 +61,9 @@ Optional variables (model-dependent):
    * - ``layer_thickness``
      - ``(depth_level,)``
      - Layer thickness in meters
+   * - ``nod_area_nans``
+     - ``(nz, npoints)``
+     - 3D node area with NaN below ocean bottom (for masking/volume computations)
 
 Supported Models
 ----------------
@@ -239,6 +242,57 @@ FESOM-Specific Functions
 
    # Compute element centers (if not already present)
    mesh = nr.fesom.compute_element_centers(mesh)
+
+Depth Masking
+~~~~~~~~~~~~~
+
+FESOM output files may contain invalid values (zeros or near-zeros) for grid cells
+below the ocean bottom. The mesh provides ``nod_area_nans`` derived from the ``nod_area``
+variable, with zeros replaced by NaN to indicate cells below the seafloor.
+
+When loading from a NetCDF mesh file (``fesom.mesh.diag.nc``), nereus creates:
+
+- ``nod_area_nans``: 3D node area array (shape: ``nz, npoints``) with NaN below bottom
+
+This can be used directly in volume computations or with ``mask_by_depth()`` to mask data:
+
+.. code-block:: python
+
+   import nereus as nr
+
+   # Load mesh
+   mesh = nr.fesom.load_mesh("fesom.mesh.diag.nc")
+
+   # Check if nod_area_nans is available
+   print("nod_area_nans" in mesh)  # True for NetCDF meshes with 3D nod_area
+
+   # Mask a 3D temperature field
+   temp_masked = nr.fesom.mask_by_depth(temp_3d, mesh.nod_area_nans)
+   # Result: numpy array with NaN where nod_area_nans is NaN
+
+   # Mask a single depth level
+   temp_lev10_masked = nr.fesom.mask_by_depth(
+       temp_3d[10, :],
+       mesh.nod_area_nans[10, :]
+   )
+
+   # Use nod_area_nans directly in volume computations
+   # (NaN values are automatically excluded by nansum/nanmean)
+   volume = np.nansum(mesh.nod_area_nans.values * mesh.layer_thickness.values[:, None])
+
+The function returns a numpy array (not xarray) to avoid dimension name alignment
+issues that can occur with inconsistent dimension names across FESOM output files.
+
+**Use cases:**
+
+- Plotting transects without bottom artifacts
+- Computing volume integrals excluding invalid cells
+- Creating Hovmöller diagrams with proper bottom masking
+
+.. note::
+
+   ``nod_area_nans`` is only available when loading from NetCDF mesh files that contain
+   3D ``nod_area`` variable. ASCII-only meshes do not have this information.
 
 HEALPix
 -------

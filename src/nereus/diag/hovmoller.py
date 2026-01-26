@@ -364,6 +364,59 @@ def hovmoller(
         raise ValueError(f"Invalid mode: {mode}. Must be 'depth' or 'latitude'.")
 
 
+def _apply_y_scale(
+    ax: "Axes",
+    scale: Literal["sqrt", "power", "symlog"],
+    scale_kw: dict[str, Any],
+) -> None:
+    """Apply non-linear y-axis scaling for depth plots.
+
+    Parameters
+    ----------
+    ax : Axes
+        Matplotlib axes to modify.
+    scale : str
+        Scale type: "sqrt", "power", or "symlog".
+    scale_kw : dict
+        Scale-specific parameters.
+    """
+    from matplotlib.scale import FuncScale
+
+    if scale == "sqrt":
+        # Square root transform: handles zero naturally, spreads surface layers
+        def forward(x: NDArray) -> NDArray:
+            return np.sqrt(np.maximum(x, 0))
+
+        def inverse(x: NDArray) -> NDArray:
+            return x**2
+
+        ax.set_yscale(FuncScale(ax, (forward, inverse)))
+
+    elif scale == "power":
+        # Power transform with configurable exponent
+        exponent = scale_kw.get("exponent", 0.4)
+        if exponent <= 0 or exponent >= 1:
+            raise ValueError(
+                f"Power exponent must be between 0 and 1, got {exponent}"
+            )
+
+        def forward(x: NDArray) -> NDArray:
+            return np.power(np.maximum(x, 0), exponent)
+
+        def inverse(x: NDArray) -> NDArray:
+            return np.power(np.maximum(x, 0), 1.0 / exponent)
+
+        ax.set_yscale(FuncScale(ax, (forward, inverse)))
+
+    elif scale == "symlog":
+        # Symmetric log: linear near zero, logarithmic further out
+        linthresh = scale_kw.get("linthresh", 10.0)
+        ax.set_yscale("symlog", linthresh=linthresh)
+
+    else:
+        raise ValueError(f"Unknown y_scale: {scale}")
+
+
 def plot_hovmoller(
     time: NDArray,
     y: NDArray,
@@ -380,7 +433,8 @@ def plot_hovmoller(
     ax: "Axes | None" = None,
     invert_y: bool | None = None,
     anomaly: bool = False,
-    log_y: bool = False,
+    y_scale: Literal["linear", "sqrt", "power", "symlog"] = "linear",
+    y_scale_kw: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> tuple["Figure", "Axes"]:
     """Plot a Hovmoller diagram.
@@ -414,9 +468,16 @@ def plot_hovmoller(
     anomaly : bool
         If True and mode="depth", plot anomaly relative to first time step
         (data - data[0, :]). Default False.
-    log_y : bool
-        If True and mode="depth", use logarithmic scale for vertical axis.
-        Useful for highlighting surface layers. Default False.
+    y_scale : {"linear", "sqrt", "power", "symlog"}
+        Vertical axis scaling for depth mode. Options:
+        - "linear": No transformation (default)
+        - "sqrt": Square root transform, gives more space to surface layers
+        - "power": Power transform with configurable exponent (see y_scale_kw)
+        - "symlog": Symmetric log scale, linear near zero then logarithmic
+    y_scale_kw : dict, optional
+        Additional parameters for y_scale:
+        - For "power": {"exponent": 0.4} (default 0.4, smaller = more surface detail)
+        - For "symlog": {"linthresh": 10} (linear threshold in meters, default 10)
     **kwargs
         Additional arguments passed to pcolormesh.
 
@@ -426,6 +487,19 @@ def plot_hovmoller(
         The matplotlib Figure.
     ax : Axes
         The matplotlib Axes.
+
+    Examples
+    --------
+    >>> # Square root scaling for more surface detail
+    >>> fig, ax = plot_hovmoller(time, depth, data, y_scale="sqrt")
+
+    >>> # Power scaling with custom exponent (smaller = more surface detail)
+    >>> fig, ax = plot_hovmoller(time, depth, data, y_scale="power",
+    ...                          y_scale_kw={"exponent": 0.3})
+
+    >>> # Symmetric log: linear in upper 20m, log below
+    >>> fig, ax = plot_hovmoller(time, depth, data, y_scale="symlog",
+    ...                          y_scale_kw={"linthresh": 20})
     """
     time = np.asarray(time)
     y = np.asarray(y)
@@ -485,9 +559,10 @@ def plot_hovmoller(
     if invert_y:
         ax.invert_yaxis()
 
-    # Logarithmic y-axis for depth mode
-    if log_y and mode == "depth":
-        ax.set_yscale("log")
+    # Apply y-axis scaling for depth mode
+    if y_scale != "linear" and mode == "depth":
+        scale_kw = y_scale_kw or {}
+        _apply_y_scale(ax, y_scale, scale_kw)
 
     # Colorbar
     if colorbar:

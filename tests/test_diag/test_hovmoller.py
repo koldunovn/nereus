@@ -421,57 +421,127 @@ class TestPlotHovmoller:
 
         plt.close(fig)
 
-    def test_plot_hovmoller_log_y(self):
-        """Test Hovmoller plot with logarithmic y-axis."""
+    def test_plot_hovmoller_y_scale_sqrt(self):
+        """Test Hovmoller plot with sqrt y-axis scaling."""
         import matplotlib.pyplot as plt
 
         time = np.arange(5)
-        depth = np.array([10, 50, 100, 500, 1000])  # Non-zero depths for log scale
-        data = np.random.rand(5, 5)
+        depth = np.array([0, 10, 50, 100, 500, 1000])
+        data = np.random.rand(5, 6)
 
-        fig, ax = plot_hovmoller(time, depth, data, mode="depth", log_y=True)
+        fig, ax = plot_hovmoller(time, depth, data, mode="depth", y_scale="sqrt")
 
-        # Check that y-axis is logarithmic
-        assert ax.get_yscale() == "log"
+        # Check that y-axis uses function scale
+        assert ax.get_yscale() == "function"
 
         plt.close(fig)
 
-    def test_plot_hovmoller_log_y_only_depth_mode(self):
-        """Test that log_y option only affects depth mode."""
+    def test_plot_hovmoller_y_scale_power(self):
+        """Test Hovmoller plot with power y-axis scaling."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([0, 10, 50, 100, 500, 1000])
+        data = np.random.rand(5, 6)
+
+        fig, ax = plot_hovmoller(
+            time, depth, data, mode="depth", y_scale="power", y_scale_kw={"exponent": 0.3}
+        )
+
+        # Check that y-axis uses function scale
+        assert ax.get_yscale() == "function"
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_y_scale_symlog(self):
+        """Test Hovmoller plot with symlog y-axis scaling."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([0, 10, 50, 100, 500, 1000])
+        data = np.random.rand(5, 6)
+
+        fig, ax = plot_hovmoller(
+            time, depth, data, mode="depth", y_scale="symlog", y_scale_kw={"linthresh": 20}
+        )
+
+        # Check that y-axis uses symlog scale
+        assert ax.get_yscale() == "symlog"
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_y_scale_only_depth_mode(self):
+        """Test that y_scale option only affects depth mode."""
         import matplotlib.pyplot as plt
 
         time = np.arange(5)
         lat = np.array([-60, -30, 0, 30, 60])
         data = np.random.rand(5, 5)
 
-        # log_y should be ignored for latitude mode
-        fig, ax = plot_hovmoller(time, lat, data, mode="latitude", log_y=True)
+        # y_scale should be ignored for latitude mode
+        fig, ax = plot_hovmoller(time, lat, data, mode="latitude", y_scale="sqrt")
 
         # Y-axis should remain linear
         assert ax.get_yscale() == "linear"
 
         plt.close(fig)
 
-    def test_plot_hovmoller_anomaly_and_log_y_combined(self):
-        """Test Hovmoller plot with both anomaly and log_y options."""
+    def test_plot_hovmoller_y_scale_power_default_exponent(self):
+        """Test power scale with default exponent."""
         import matplotlib.pyplot as plt
 
         time = np.arange(5)
-        depth = np.array([10, 50, 100, 500, 1000])
+        depth = np.array([0, 10, 50, 100, 500, 1000])
+        data = np.random.rand(5, 6)
+
+        # Should work with default exponent (0.4)
+        fig, ax = plot_hovmoller(time, depth, data, mode="depth", y_scale="power")
+
+        assert ax.get_yscale() == "function"
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_y_scale_power_invalid_exponent(self):
+        """Test that invalid power exponent raises error."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([0, 10, 50, 100, 500, 1000])
+        data = np.random.rand(5, 6)
+
+        # Exponent must be between 0 and 1
+        with pytest.raises(ValueError, match="exponent must be between 0 and 1"):
+            plot_hovmoller(
+                time, depth, data, mode="depth",
+                y_scale="power", y_scale_kw={"exponent": 1.5}
+            )
+
+        with pytest.raises(ValueError, match="exponent must be between 0 and 1"):
+            plot_hovmoller(
+                time, depth, data, mode="depth",
+                y_scale="power", y_scale_kw={"exponent": 0}
+            )
+
+    def test_plot_hovmoller_anomaly_and_y_scale_combined(self):
+        """Test Hovmoller plot with both anomaly and y_scale options."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([0, 10, 50, 100, 500, 1000])
         data = np.array([
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [12.0, 22.0, 32.0, 42.0, 52.0],
-            [15.0, 25.0, 35.0, 45.0, 55.0],
-            [11.0, 21.0, 31.0, 41.0, 51.0],
-            [13.0, 23.0, 33.0, 43.0, 53.0],
+            [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+            [12.0, 22.0, 32.0, 42.0, 52.0, 62.0],
+            [15.0, 25.0, 35.0, 45.0, 55.0, 65.0],
+            [11.0, 21.0, 31.0, 41.0, 51.0, 61.0],
+            [13.0, 23.0, 33.0, 43.0, 53.0, 63.0],
         ])
 
         fig, ax = plot_hovmoller(
-            time, depth, data, mode="depth", anomaly=True, log_y=True
+            time, depth, data, mode="depth", anomaly=True, y_scale="sqrt"
         )
 
-        # Check log scale
-        assert ax.get_yscale() == "log"
+        # Check function scale (sqrt)
+        assert ax.get_yscale() == "function"
 
         # Check anomaly data
         mesh = ax.collections[0]

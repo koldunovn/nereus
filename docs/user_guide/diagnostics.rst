@@ -322,32 +322,90 @@ Plot temporal anomalies relative to the first time step using the ``anomaly`` op
        title="Temperature Anomaly Evolution"
    )
 
-Logarithmic Depth Scale
-~~~~~~~~~~~~~~~~~~~~~~~
+Depth Axis Scaling
+~~~~~~~~~~~~~~~~~~
 
-Use logarithmic vertical scale to highlight surface layers using the ``log_y`` option:
+Use non-linear vertical scaling to give more visual detail to surface layers
+where ocean dynamics are most active. The ``y_scale`` parameter supports several options:
+
+**Square Root Scale** (recommended for most cases):
 
 .. code-block:: python
 
-   # Plot with logarithmic depth scale
+   # Square root scaling - handles depth=0, good surface detail
    fig, ax = nr.plot_hovmoller(
        time, depth_out, hov_data,
        mode="depth",
-       log_y=True,  # Logarithmic y-axis
+       y_scale="sqrt",
        colorbar_label="Temperature (°C)",
-       title="Temperature (log depth scale)"
+       title="Temperature (sqrt depth scale)"
    )
 
-   # Combine both options
+**Power Scale** (configurable surface expansion):
+
+.. code-block:: python
+
+   # Power scaling with custom exponent
+   # Smaller exponent = more surface detail (0.3-0.5 typical)
+   fig, ax = nr.plot_hovmoller(
+       time, depth_out, hov_data,
+       mode="depth",
+       y_scale="power",
+       y_scale_kw={"exponent": 0.3},  # More aggressive surface expansion
+       colorbar_label="Temperature (°C)",
+       title="Temperature (power scale)"
+   )
+
+**Symmetric Log Scale** (linear near surface, log at depth):
+
+.. code-block:: python
+
+   # Linear in upper 20m (mixed layer), logarithmic below
+   fig, ax = nr.plot_hovmoller(
+       time, depth_out, hov_data,
+       mode="depth",
+       y_scale="symlog",
+       y_scale_kw={"linthresh": 20},  # Linear threshold in meters
+       colorbar_label="Temperature (°C)",
+       title="Temperature (symlog scale)"
+   )
+
+**Combining with Anomaly**:
+
+.. code-block:: python
+
+   # Anomaly plot with sqrt depth scaling
    fig, ax = nr.plot_hovmoller(
        time, depth_out, hov_data,
        mode="depth",
        anomaly=True,
-       log_y=True,
+       y_scale="sqrt",
        cmap="RdBu_r",
        colorbar_label="Temperature anomaly (°C)",
-       title="Temperature Anomaly (log depth scale)"
+       title="Temperature Anomaly (sqrt depth scale)"
    )
+
+**Scale Options Summary**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 40 45
+
+   * - Scale
+     - Description
+     - Best For
+   * - ``"linear"``
+     - No transformation (default)
+     - When uniform depth spacing is desired
+   * - ``"sqrt"``
+     - Square root transform
+     - General use, good balance of surface detail
+   * - ``"power"``
+     - Power transform (exponent 0.3-0.5)
+     - Maximum surface detail, deep ocean compressed
+   * - ``"symlog"``
+     - Linear near zero, log at depth
+     - When you want true linear spacing in mixed layer
 
 Working with Time Series
 ------------------------

@@ -9,6 +9,14 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
+Changed
+~~~~~~~
+
+- ``plot_hovmoller``: Replaced ``log_y`` parameter with ``y_scale`` supporting multiple
+  scaling options for depth axis: ``"linear"`` (default), ``"sqrt"`` (square root),
+  ``"power"`` (configurable exponent), and ``"symlog"`` (symmetric log). These options
+  properly handle depth=0 and provide better control over surface layer visualization.
+
 [0.2.1] - 2026-01-23
 --------------------
 

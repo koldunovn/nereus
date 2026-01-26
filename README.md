@@ -96,9 +96,12 @@ nr.transect(
 | Model/mesh | Status |
 |------------|--------|
 | FESOM2 | ✅ Full support |
-| ICON-O | 🔧 In development |
-| ICON-A | 🔧 In development |
-| HEALPix | 📋 Planned |
+| IFS TCO | ✅ Full support |
+| HEALPix | 🔧 In development |
+| ICON-O | 📋 Planned |
+| ICON-A | 📋 Planned |
+| NEMO   | 📋 Planned |
+
 
 ## Documentation
 

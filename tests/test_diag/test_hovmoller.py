@@ -370,6 +370,117 @@ class TestPlotHovmoller:
 
         plt.close(fig)
 
+    def test_plot_hovmoller_anomaly(self):
+        """Test Hovmoller plot with anomaly option."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([0, 100, 500])
+        # Create data with known values
+        data = np.array([
+            [10.0, 20.0, 30.0],  # t=0 (reference)
+            [12.0, 22.0, 32.0],  # t=1
+            [15.0, 25.0, 35.0],  # t=2
+            [11.0, 21.0, 31.0],  # t=3
+            [13.0, 23.0, 33.0],  # t=4
+        ])
+
+        fig, ax = plot_hovmoller(time, depth, data, mode="depth", anomaly=True)
+
+        # Get the plotted data from the pcolormesh
+        # The data is transposed when plotted
+        mesh = ax.collections[0]
+        plotted_data = mesh.get_array().reshape(len(depth), len(time)).T
+
+        # Expected anomaly: data - data[0, :]
+        expected_anomaly = data - data[0, :]
+        np.testing.assert_array_almost_equal(plotted_data, expected_anomaly)
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_anomaly_only_depth_mode(self):
+        """Test that anomaly option only affects depth mode."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(3)
+        lat = np.array([-60, 0, 60])
+        data = np.array([
+            [10.0, 20.0, 30.0],
+            [12.0, 22.0, 32.0],
+            [15.0, 25.0, 35.0],
+        ])
+
+        # Anomaly should be ignored for latitude mode
+        fig, ax = plot_hovmoller(time, lat, data, mode="latitude", anomaly=True)
+
+        mesh = ax.collections[0]
+        plotted_data = mesh.get_array().reshape(len(lat), len(time)).T
+
+        # Data should be unchanged (anomaly not applied for latitude mode)
+        np.testing.assert_array_almost_equal(plotted_data, data)
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_log_y(self):
+        """Test Hovmoller plot with logarithmic y-axis."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([10, 50, 100, 500, 1000])  # Non-zero depths for log scale
+        data = np.random.rand(5, 5)
+
+        fig, ax = plot_hovmoller(time, depth, data, mode="depth", log_y=True)
+
+        # Check that y-axis is logarithmic
+        assert ax.get_yscale() == "log"
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_log_y_only_depth_mode(self):
+        """Test that log_y option only affects depth mode."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        lat = np.array([-60, -30, 0, 30, 60])
+        data = np.random.rand(5, 5)
+
+        # log_y should be ignored for latitude mode
+        fig, ax = plot_hovmoller(time, lat, data, mode="latitude", log_y=True)
+
+        # Y-axis should remain linear
+        assert ax.get_yscale() == "linear"
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_anomaly_and_log_y_combined(self):
+        """Test Hovmoller plot with both anomaly and log_y options."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        depth = np.array([10, 50, 100, 500, 1000])
+        data = np.array([
+            [10.0, 20.0, 30.0, 40.0, 50.0],
+            [12.0, 22.0, 32.0, 42.0, 52.0],
+            [15.0, 25.0, 35.0, 45.0, 55.0],
+            [11.0, 21.0, 31.0, 41.0, 51.0],
+            [13.0, 23.0, 33.0, 43.0, 53.0],
+        ])
+
+        fig, ax = plot_hovmoller(
+            time, depth, data, mode="depth", anomaly=True, log_y=True
+        )
+
+        # Check log scale
+        assert ax.get_yscale() == "log"
+
+        # Check anomaly data
+        mesh = ax.collections[0]
+        plotted_data = mesh.get_array().reshape(len(depth), len(time)).T
+        expected_anomaly = data - data[0, :]
+        np.testing.assert_array_almost_equal(plotted_data, expected_anomaly)
+
+        plt.close(fig)
+
 
 class TestDaskCompatibility:
     """Tests for dask array compatibility."""

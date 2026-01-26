@@ -305,6 +305,50 @@ Plotting Hovmoller
        title="SST Zonal Mean"
    )
 
+Anomaly Hovmoller
+~~~~~~~~~~~~~~~~~
+
+Plot temporal anomalies relative to the first time step using the ``anomaly`` option:
+
+.. code-block:: python
+
+   # Plot anomaly (deviation from first time step)
+   fig, ax = nr.plot_hovmoller(
+       time, depth_out, hov_data,
+       mode="depth",
+       anomaly=True,  # Computes hov_data - hov_data[0, :]
+       cmap="RdBu_r",
+       colorbar_label="Temperature anomaly (°C)",
+       title="Temperature Anomaly Evolution"
+   )
+
+Logarithmic Depth Scale
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Use logarithmic vertical scale to highlight surface layers using the ``log_y`` option:
+
+.. code-block:: python
+
+   # Plot with logarithmic depth scale
+   fig, ax = nr.plot_hovmoller(
+       time, depth_out, hov_data,
+       mode="depth",
+       log_y=True,  # Logarithmic y-axis
+       colorbar_label="Temperature (°C)",
+       title="Temperature (log depth scale)"
+   )
+
+   # Combine both options
+   fig, ax = nr.plot_hovmoller(
+       time, depth_out, hov_data,
+       mode="depth",
+       anomaly=True,
+       log_y=True,
+       cmap="RdBu_r",
+       colorbar_label="Temperature anomaly (°C)",
+       title="Temperature Anomaly (log depth scale)"
+   )
+
 Working with Time Series
 ------------------------
 

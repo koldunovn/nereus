@@ -379,6 +379,8 @@ def plot_hovmoller(
     figsize: tuple[float, float] | None = None,
     ax: "Axes | None" = None,
     invert_y: bool | None = None,
+    anomaly: bool = False,
+    log_y: bool = False,
     **kwargs: Any,
 ) -> tuple["Figure", "Axes"]:
     """Plot a Hovmoller diagram.
@@ -409,6 +411,12 @@ def plot_hovmoller(
         Existing axes to plot on.
     invert_y : bool, optional
         Whether to invert y-axis. Default True for depth, False for latitude.
+    anomaly : bool
+        If True and mode="depth", plot anomaly relative to first time step
+        (data - data[0, :]). Default False.
+    log_y : bool
+        If True and mode="depth", use logarithmic scale for vertical axis.
+        Useful for highlighting surface layers. Default False.
     **kwargs
         Additional arguments passed to pcolormesh.
 
@@ -437,6 +445,10 @@ def plot_hovmoller(
             f"Make sure you're using the y coordinates returned by hovmoller(), "
             f"not the original mesh coordinates."
         )
+
+    # Compute anomaly if requested (only for depth mode)
+    if anomaly and mode == "depth":
+        data = data - data[0, :]
 
     # Create figure if needed
     if ax is None:
@@ -472,6 +484,10 @@ def plot_hovmoller(
 
     if invert_y:
         ax.invert_yaxis()
+
+    # Logarithmic y-axis for depth mode
+    if log_y and mode == "depth":
+        ax.set_yscale("log")
 
     # Colorbar
     if colorbar:

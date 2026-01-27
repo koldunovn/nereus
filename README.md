@@ -1,6 +1,7 @@
-# Nereus
+# <img width="200" alt="nereus2" src="https://github.com/user-attachments/assets/c31aefbd-43c0-4021-a73e-c1c3507091aa" />
 
-**Fast visualization and diagnostics for unstructured climate model data**
+
+**Nereus, fast visualization and diagnostics for unstructured climate model data**
 
 [![CI](https://github.com/koldunovn/nereus/actions/workflows/ci.yml/badge.svg)](https://github.com/koldunovn/nereus/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/nereus.svg)](https://badge.fury.io/py/nereus)

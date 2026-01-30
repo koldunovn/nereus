@@ -3,7 +3,13 @@
 import numpy as np
 import pytest
 
-from nereus.core.grids import create_regular_grid, grid_cell_area
+from nereus.core.grids import (
+    create_regular_grid,
+    extract_coordinates,
+    grid_cell_area,
+    prepare_coordinates,
+    prepare_input_arrays,
+)
 
 
 class TestCreateRegularGrid:
@@ -105,3 +111,286 @@ class TestGridCellArea:
         polar_area = area[0, 0]
 
         assert polar_area < equator_area
+
+
+class TestPrepareInputArrays:
+    """Tests for prepare_input_arrays function."""
+
+    def test_all_1d_same_size(self):
+        """Test all 1D arrays of same size pass through unchanged."""
+        data = np.random.rand(100)
+        lon = np.random.uniform(-180, 180, 100)
+        lat = np.random.uniform(-90, 90, 100)
+
+        d, lo, la = prepare_input_arrays(data, lon, lat)
+
+        np.testing.assert_array_equal(d, data)
+        np.testing.assert_array_equal(lo, lon)
+        np.testing.assert_array_equal(la, lat)
+
+    def test_all_2d_same_shape(self):
+        """Test all 2D arrays of same shape are raveled."""
+        data = np.random.rand(10, 20)
+        lon = np.random.uniform(-180, 180, (10, 20))
+        lat = np.random.uniform(-90, 90, (10, 20))
+
+        with pytest.warns(UserWarning, match="Raveling 2D arrays"):
+            d, lo, la = prepare_input_arrays(data, lon, lat)
+
+        assert d.ndim == 1
+        assert d.size == 200
+        assert lo.size == 200
+        assert la.size == 200
+
+    def test_1d_data_2d_coords(self):
+        """Test 1D data with 2D lon/lat (pre-ravelled case)."""
+        data = np.random.rand(200)
+        lon = np.random.uniform(-180, 180, (10, 20))
+        lat = np.random.uniform(-90, 90, (10, 20))
+
+        with pytest.warns(UserWarning, match="Raveling 2D lon/lat"):
+            d, lo, la = prepare_input_arrays(data, lon, lat)
+
+        assert d.size == lo.size == la.size == 200
+
+    def test_2d_data_1d_coords_meshgrid(self):
+        """Test 2D data with 1D coords creates meshgrid."""
+        data = np.random.rand(18, 36)  # (ny, nx)
+        lon = np.linspace(-180, 180, 36)  # nx
+        lat = np.linspace(-90, 90, 18)  # ny
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            d, lo, la = prepare_input_arrays(data, lon, lat)
+
+        assert d.size == 18 * 36
+        assert lo.size == 18 * 36
+        assert la.size == 18 * 36
+
+    def test_1d_size_mismatch_raises(self):
+        """Test that 1D arrays with different sizes raise error."""
+        data = np.random.rand(100)
+        lon = np.random.rand(200)
+        lat = np.random.rand(100)
+
+        with pytest.raises(ValueError, match="1D arrays must have the same size"):
+            prepare_input_arrays(data, lon, lat)
+
+    def test_2d_shape_mismatch_raises(self):
+        """Test that 2D arrays with different shapes raise error."""
+        data = np.random.rand(10, 20)
+        lon = np.random.rand(10, 30)
+        lat = np.random.rand(10, 20)
+
+        with pytest.raises(ValueError, match="2D arrays must have the same shape"):
+            prepare_input_arrays(data, lon, lat)
+
+    def test_2d_data_wrong_1d_lon_size_raises(self):
+        """Test 2D data with wrong 1D lon size raises error."""
+        data = np.random.rand(10, 20)
+        lon = np.random.rand(15)  # Should be 20
+        lat = np.random.rand(10)
+
+        with pytest.raises(ValueError, match="1D lon array size"):
+            prepare_input_arrays(data, lon, lat)
+
+    def test_2d_data_wrong_1d_lat_size_raises(self):
+        """Test 2D data with wrong 1D lat size raises error."""
+        data = np.random.rand(10, 20)
+        lon = np.random.rand(20)
+        lat = np.random.rand(15)  # Should be 10
+
+        with pytest.raises(ValueError, match="1D lat array size"):
+            prepare_input_arrays(data, lon, lat)
+
+    def test_mixed_1d_2d_coords_raises(self):
+        """Test that mixed 1D/2D lon/lat raises error."""
+        data = np.random.rand(100)
+        lon = np.random.rand(10, 10)  # 2D
+        lat = np.random.rand(100)  # 1D
+
+        with pytest.raises(ValueError, match="both be 1D or both be 2D"):
+            prepare_input_arrays(data, lon, lat)
+
+
+class TestPrepareCoordinates:
+    """Tests for prepare_coordinates function."""
+
+    def test_both_1d_same_size(self):
+        """Test both 1D with same size pass through."""
+        lon = np.random.uniform(-180, 180, 100)
+        lat = np.random.uniform(-90, 90, 100)
+
+        lo, la = prepare_coordinates(lon, lat)
+
+        np.testing.assert_array_equal(lo, lon)
+        np.testing.assert_array_equal(la, lat)
+
+    def test_both_2d_same_shape(self):
+        """Test both 2D with same shape are raveled."""
+        lon = np.random.uniform(-180, 180, (10, 20))
+        lat = np.random.uniform(-90, 90, (10, 20))
+
+        with pytest.warns(UserWarning, match="Raveling 2D lon/lat"):
+            lo, la = prepare_coordinates(lon, lat)
+
+        assert lo.size == 200
+        assert la.size == 200
+
+    def test_both_1d_different_size_meshgrid(self):
+        """Test 1D coords with different sizes creates meshgrid."""
+        lon = np.linspace(-180, 180, 36)
+        lat = np.linspace(-90, 90, 18)
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            lo, la = prepare_coordinates(lon, lat)
+
+        assert lo.size == 36 * 18
+        assert la.size == 36 * 18
+
+    def test_mixed_1d_2d_raises(self):
+        """Test mixed 1D/2D raises error."""
+        lon = np.random.rand(10, 10)
+        lat = np.random.rand(100)
+
+        with pytest.raises(ValueError, match="both be 1D or both be 2D"):
+            prepare_coordinates(lon, lat)
+
+
+class TestExtractCoordinates:
+    """Tests for extract_coordinates function."""
+
+    def test_non_xarray_returns_none(self):
+        """Test that non-xarray input returns (None, None)."""
+        data = np.random.rand(100)
+
+        lon, lat = extract_coordinates(data)
+
+        assert lon is None
+        assert lat is None
+
+    def test_xarray_with_lon_lat(self):
+        """Test extraction from xarray with lon/lat coords."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        data_vals = np.random.rand(18, 36)
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"lat": lat_vals, "lon": lon_vals},
+            dims=["lat", "lon"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is not None
+        assert lat is not None
+        np.testing.assert_array_equal(lon, lon_vals)
+        np.testing.assert_array_equal(lat, lat_vals)
+
+    def test_xarray_with_longitude_latitude(self):
+        """Test extraction with longitude/latitude names."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        data_vals = np.random.rand(18, 36)
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"latitude": lat_vals, "longitude": lon_vals},
+            dims=["latitude", "longitude"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is not None
+        assert lat is not None
+        np.testing.assert_array_equal(lon, lon_vals)
+        np.testing.assert_array_equal(lat, lat_vals)
+
+    def test_xarray_with_x_y(self):
+        """Test extraction with x/y names."""
+        xr = pytest.importorskip("xarray")
+
+        x_vals = np.linspace(-180, 180, 36)
+        y_vals = np.linspace(-90, 90, 18)
+        data_vals = np.random.rand(18, 36)
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"y": y_vals, "x": x_vals},
+            dims=["y", "x"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is not None
+        assert lat is not None
+        np.testing.assert_array_equal(lon, x_vals)
+        np.testing.assert_array_equal(lat, y_vals)
+
+    def test_xarray_case_insensitive(self):
+        """Test that coordinate names are matched case-insensitively."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        data_vals = np.random.rand(18, 36)
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"LAT": lat_vals, "LON": lon_vals},
+            dims=["LAT", "LON"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is not None
+        assert lat is not None
+
+    def test_xarray_without_coords_returns_none(self):
+        """Test that xarray without recognized coords returns None."""
+        xr = pytest.importorskip("xarray")
+
+        data_vals = np.random.rand(18, 36)
+        da = xr.DataArray(
+            data_vals,
+            coords={"dim0": np.arange(18), "dim1": np.arange(36)},
+            dims=["dim0", "dim1"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is None
+        assert lat is None
+
+    def test_xarray_2d_coords(self):
+        """Test extraction of 2D coordinates (curvilinear grids)."""
+        xr = pytest.importorskip("xarray")
+
+        # Create 2D coordinates (like a curvilinear grid)
+        y_idx = np.arange(18)
+        x_idx = np.arange(36)
+        lon_2d = np.random.uniform(-180, 180, (18, 36))
+        lat_2d = np.random.uniform(-90, 90, (18, 36))
+        data_vals = np.random.rand(18, 36)
+
+        da = xr.DataArray(
+            data_vals,
+            coords={
+                "y": y_idx,
+                "x": x_idx,
+                "lon": (["y", "x"], lon_2d),
+                "lat": (["y", "x"], lat_2d),
+            },
+            dims=["y", "x"],
+        )
+
+        lon, lat = extract_coordinates(da)
+
+        assert lon is not None
+        assert lat is not None
+        np.testing.assert_array_equal(lon, lon_2d)
+        np.testing.assert_array_equal(lat, lat_2d)

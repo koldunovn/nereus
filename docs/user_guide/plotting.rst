@@ -22,10 +22,77 @@ Basic Parameters
 ~~~~~~~~~~~~~~~~
 
 **data** : array-like
-   1D array of values at each mesh point.
+   Array of values at each mesh point. Can be 1D or 2D.
+   If xarray DataArray, coordinates may be extracted automatically.
 
-**lon, lat** : array-like
-   1D arrays of longitude and latitude coordinates (in degrees).
+**lon, lat** : array-like, optional
+   Longitude and latitude coordinates (in degrees). Can be 1D or 2D.
+   If not provided, will attempt to extract from xarray DataArray.
+
+Flexible Input Formats
+~~~~~~~~~~~~~~~~~~~~~~
+
+Nereus accepts various input formats and automatically handles the conversion:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Data
+     - Lon/Lat
+     - Behavior
+   * - 1D
+     - 1D (same size)
+     - Used directly (no warning)
+   * - 2D
+     - 2D (same shape)
+     - All raveled to 1D (warning issued)
+   * - 1D
+     - 2D
+     - Lon/lat raveled to match data (warning issued)
+   * - 2D
+     - 1D
+     - Meshgrid created, then all raveled (warning issued)
+
+Example with 2D regular grid data:
+
+.. code-block:: python
+
+   # 2D data with 1D coordinates (like from NetCDF)
+   data_2d = np.random.rand(180, 360)
+   lon_1d = np.linspace(-179.5, 179.5, 360)
+   lat_1d = np.linspace(-89.5, 89.5, 180)
+
+   # Nereus automatically creates meshgrid internally
+   fig, ax, _ = nr.plot(data_2d, lon_1d, lat_1d)
+
+Automatic Coordinate Extraction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When working with xarray DataArrays, coordinates can be extracted automatically:
+
+.. code-block:: python
+
+   import xarray as xr
+
+   # Load data with coordinates
+   ds = xr.open_dataset("ocean_data.nc")
+   temp = ds.temperature.isel(time=0, depth=0)
+
+   # No need to specify lon/lat - extracted automatically
+   fig, ax, _ = nr.plot(temp)
+
+Nereus recognizes common coordinate names:
+
+- **Longitude**: ``lon``, ``longitude``, ``x``, ``nav_lon``, ``glon``, ``xt_ocean``, etc.
+- **Latitude**: ``lat``, ``latitude``, ``y``, ``nav_lat``, ``glat``, ``yt_ocean``, etc.
+
+You can also override one coordinate while extracting the other:
+
+.. code-block:: python
+
+   # Use custom lon, extract lat from xarray
+   fig, ax, _ = nr.plot(temp, lon=custom_lon)
 
 **projection** : str, default "pc"
    Map projection to use. See :ref:`projections` below.

@@ -22,6 +22,73 @@ The function returns:
 * ``regridded``: 2D numpy array on the regular grid
 * ``interpolator``: The :class:`~nereus.RegridInterpolator` for reuse
 
+Flexible Input Formats
+----------------------
+
+Nereus accepts various input formats and handles the conversion automatically:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Data
+     - Lon/Lat
+     - Behavior
+   * - 1D
+     - 1D (same size)
+     - Used directly (no warning)
+   * - 2D
+     - 2D (same shape)
+     - All raveled to 1D (warning issued)
+   * - 1D
+     - 2D
+     - Lon/lat raveled to match data (warning issued)
+   * - 2D
+     - 1D
+     - Meshgrid created, then all raveled (warning issued)
+
+Example with 2D regular grid data:
+
+.. code-block:: python
+
+   # 2D data with 1D coordinates (like from NetCDF)
+   data_2d = np.random.rand(180, 360)
+   lon_1d = np.linspace(-179.5, 179.5, 360)
+   lat_1d = np.linspace(-89.5, 89.5, 180)
+
+   # Nereus automatically creates meshgrid internally
+   regridded, _ = nr.regrid(data_2d, lon_1d, lat_1d, resolution=0.5)
+
+Automatic Coordinate Extraction
+-------------------------------
+
+When working with xarray DataArrays, coordinates can be extracted automatically:
+
+.. code-block:: python
+
+   import xarray as xr
+
+   # Load data with coordinates
+   ds = xr.open_dataset("ocean_data.nc")
+   temp = ds.temperature.isel(time=0, depth=0)
+
+   # No need to specify lon/lat - extracted automatically
+   regridded, interp = nr.regrid(temp, resolution=0.5)
+
+Nereus recognizes common coordinate names:
+
+- **Longitude**: ``lon``, ``longitude``, ``x``, ``nav_lon``, ``glon``, ``xt_ocean``, ``xu_ocean``, ``xh``, ``xq``, ``nod2d_lon``
+- **Latitude**: ``lat``, ``latitude``, ``y``, ``nav_lat``, ``glat``, ``yt_ocean``, ``yu_ocean``, ``yh``, ``yq``, ``nod2d_lat``
+
+Coordinate names are matched case-insensitively.
+
+You can also override one coordinate while extracting the other:
+
+.. code-block:: python
+
+   # Use custom lon, extract lat from xarray
+   regridded, _ = nr.regrid(temp, lon=custom_lon, resolution=0.5)
+
 Resolution Options
 ------------------
 

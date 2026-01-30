@@ -14,7 +14,12 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from nereus.core.coordinates import lonlat_to_cartesian, meters_to_chord
-from nereus.core.grids import create_regular_grid, prepare_coordinates, prepare_input_arrays
+from nereus.core.grids import (
+    create_regular_grid,
+    extract_coordinates,
+    prepare_coordinates,
+    prepare_input_arrays,
+)
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -200,8 +205,8 @@ class RegridInterpolator:
 
 def regrid(
     data: NDArray | "xr.DataArray",
-    lon: NDArray[np.floating],
-    lat: NDArray[np.floating],
+    lon: NDArray[np.floating] | None = None,
+    lat: NDArray[np.floating] | None = None,
     resolution: float | tuple[int, int] = 1.0,
     method: Literal["nearest"] = "nearest",
     influence_radius: float = 80_000.0,
@@ -225,14 +230,21 @@ def regrid(
 
     A warning is issued whenever array transformations are applied.
 
+    If lon/lat are not provided and data is an xarray DataArray, the function
+    will attempt to extract coordinates automatically by looking for common
+    coordinate names (lon/lat, longitude/latitude, x/y, etc.).
+
     Parameters
     ----------
     data : array_like
         Data to interpolate. Can be 1D or 2D array.
-    lon : array_like
+        If xarray DataArray, coordinates may be extracted automatically.
+    lon : array_like, optional
         Source grid longitude coordinates. Can be 1D or 2D array.
-    lat : array_like
+        If None, will attempt to extract from data (xarray only).
+    lat : array_like, optional
         Source grid latitude coordinates. Can be 1D or 2D array.
+        If None, will attempt to extract from data (xarray only).
     resolution : float or tuple of int
         Target grid resolution.
     method : {"nearest"}
@@ -253,6 +265,22 @@ def regrid(
     interpolator : RegridInterpolator
         The interpolator used (can be reused for other variables).
     """
+    # Extract coordinates from xarray if not provided
+    if lon is None or lat is None:
+        extracted_lon, extracted_lat = extract_coordinates(data)
+        if lon is None:
+            lon = extracted_lon
+        if lat is None:
+            lat = extracted_lat
+
+    # Validate that we have coordinates
+    if lon is None or lat is None:
+        raise ValueError(
+            "lon and lat coordinates are required. Either provide them explicitly "
+            "or use an xarray DataArray with recognizable coordinate names "
+            "(lon/lat, longitude/latitude, x/y, etc.)."
+        )
+
     # Prepare inputs: handle various array shapes and validate
     data_values, lon_arr, lat_arr = prepare_input_arrays(data, lon, lat)
 

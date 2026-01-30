@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from nereus.core.coordinates import great_circle_path, lonlat_to_cartesian
-from nereus.core.grids import prepare_coordinates
+from nereus.core.grids import extract_coordinates, prepare_coordinates
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
 def transect(
     data: NDArray | "xr.DataArray",
-    lon: NDArray[np.floating],
-    lat: NDArray[np.floating],
-    depth: NDArray[np.floating],
-    start: tuple[float, float],
-    end: tuple[float, float],
+    lon: NDArray[np.floating] | None = None,
+    lat: NDArray[np.floating] | None = None,
+    depth: NDArray[np.floating] | None = None,
+    start: tuple[float, float] | None = None,
+    end: tuple[float, float] | None = None,
     *,
     n_points: int = 100,
     cmap: str = "viridis",
@@ -54,14 +54,21 @@ def transect(
 
     A warning is issued whenever coordinate transformations are applied.
 
+    If lon/lat are not provided and data is an xarray DataArray, the function
+    will attempt to extract coordinates automatically by looking for common
+    coordinate names (lon/lat, longitude/latitude, x/y, etc.).
+
     Parameters
     ----------
     data : array_like
         2D array of data values with shape (nlevels, npoints).
-    lon : array_like
+        If xarray DataArray, coordinates may be extracted automatically.
+    lon : array_like, optional
         Longitude coordinates. Can be 1D or 2D array.
-    lat : array_like
+        If None, will attempt to extract from data (xarray only).
+    lat : array_like, optional
         Latitude coordinates. Can be 1D or 2D array.
+        If None, will attempt to extract from data (xarray only).
     depth : array_like
         1D array of depth levels (positive downward).
     start : tuple of float
@@ -106,6 +113,26 @@ def transect(
     ...     start=(-30, 60), end=(30, 60)
     ... )
     """
+    # Extract coordinates from xarray if not provided
+    if lon is None or lat is None:
+        extracted_lon, extracted_lat = extract_coordinates(data)
+        if lon is None:
+            lon = extracted_lon
+        if lat is None:
+            lat = extracted_lat
+
+    # Validate required parameters
+    if lon is None or lat is None:
+        raise ValueError(
+            "lon and lat coordinates are required. Either provide them explicitly "
+            "or use an xarray DataArray with recognizable coordinate names "
+            "(lon/lat, longitude/latitude, x/y, etc.)."
+        )
+    if depth is None:
+        raise ValueError("depth array is required for transect plots.")
+    if start is None or end is None:
+        raise ValueError("start and end points are required for transect plots.")
+
     # Handle xarray DataArray
     if hasattr(data, "values"):
         data = data.values

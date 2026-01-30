@@ -155,3 +155,91 @@ class TestRegridFunction:
         result2 = interp(data2)
 
         assert result2.shape == result1.shape
+
+
+class TestRegridInputFormats:
+    """Tests for regrid function with various input formats."""
+
+    def test_2d_data_2d_coords(self):
+        """Test regrid with 2D data and 2D coordinates."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        data_2d = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        with pytest.warns(UserWarning, match="Raveling 2D arrays"):
+            result, interp = regrid(data_2d, lon_2d, lat_2d, resolution=10.0)
+
+        assert result.shape == interp.target_lon.shape
+
+    def test_2d_data_1d_coords(self):
+        """Test regrid with 2D data and 1D coordinates (meshgrid case)."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        data_2d = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            result, interp = regrid(data_2d, lon_1d, lat_1d, resolution=10.0)
+
+        assert result.shape == interp.target_lon.shape
+
+    def test_missing_coords_raises(self, synthetic_data):
+        """Test that missing coordinates raises clear error."""
+        data = synthetic_data
+
+        with pytest.raises(ValueError, match="lon and lat coordinates are required"):
+            regrid(data)
+
+    def test_xarray_auto_coords(self):
+        """Test automatic coordinate extraction from xarray."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_vals, lat_vals)
+        data_vals = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"lat": lat_vals, "lon": lon_vals},
+            dims=["lat", "lon"],
+        )
+
+        # Should work without explicit lon/lat
+        with pytest.warns(UserWarning):  # Will warn about meshgrid
+            result, interp = regrid(da, resolution=10.0)
+
+        assert result.shape == interp.target_lon.shape
+
+    def test_xarray_no_recognized_coords_raises(self):
+        """Test that xarray without recognized coords raises error."""
+        xr = pytest.importorskip("xarray")
+
+        data_vals = np.random.rand(18, 36)
+        da = xr.DataArray(
+            data_vals,
+            coords={"dim0": np.arange(18), "dim1": np.arange(36)},
+            dims=["dim0", "dim1"],
+        )
+
+        with pytest.raises(ValueError, match="lon and lat coordinates are required"):
+            regrid(da, resolution=10.0)
+
+
+class TestInterpolator2DCoords:
+    """Tests for RegridInterpolator with 2D coordinates."""
+
+    def test_2d_coords_raveled(self):
+        """Test that 2D coordinates are properly raveled."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+
+        with pytest.warns(UserWarning, match="Raveling 2D"):
+            interp = RegridInterpolator(lon_2d, lat_2d, resolution=10.0)
+
+        # Check that source coordinates are 1D
+        assert interp.source_lon.ndim == 1
+        assert interp.source_lat.ndim == 1
+        assert interp.source_lon.size == 36 * 18

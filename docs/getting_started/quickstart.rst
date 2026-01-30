@@ -24,20 +24,28 @@ The most common use case is plotting data from an unstructured mesh:
    # Load your data (example with xarray)
    ds = xr.open_dataset("model_output.nc")
 
-   # Get 2D data, longitude, and latitude
-   data = ds.temperature.isel(time=0, depth=0).values
-   lon = ds.lon.values
-   lat = ds.lat.values
+   # Get temperature data
+   temp = ds.temperature.isel(time=0, depth=0)
 
-   # Create a map plot
+   # Create a map plot - coordinates extracted automatically from xarray
    fig, ax, interpolator = nr.plot(
-       data, lon, lat,
+       temp,
        projection="rob",      # Robinson projection
        cmap="RdBu_r",         # Colormap
        vmin=-2, vmax=30,      # Color limits
        coastlines=True,       # Add coastlines
        colorbar=True,         # Add colorbar
        title="Sea Surface Temperature"
+   )
+
+You can also explicitly provide coordinates if needed:
+
+.. code-block:: python
+
+   # With explicit coordinates
+   fig, ax, interpolator = nr.plot(
+       temp.values, ds.lon.values, ds.lat.values,
+       projection="rob"
    )
 
 The ``plot`` function returns:
@@ -87,7 +95,10 @@ To regrid data from an unstructured mesh to a regular grid:
 
 .. code-block:: python
 
-   # Simple regridding
+   # Simple regridding - coordinates extracted from xarray
+   regridded, interpolator = nr.regrid(temp, resolution=1.0)
+
+   # Or with explicit coordinates
    regridded, interpolator = nr.regrid(
        data, lon, lat,
        resolution=1.0,  # 1-degree resolution

@@ -103,6 +103,50 @@ You can control caching behavior:
    # Manually reuse an interpolator
    nr.plot(data, lon, lat, interpolator=interp)
 
+Flexible Input Handling
+-----------------------
+
+Nereus is designed to work with data in various formats without requiring manual preprocessing.
+
+**Automatic Array Reshaping**
+
+Functions like ``plot()``, ``regrid()``, and ``transect()`` accept data and coordinates in multiple formats:
+
+- **1D arrays**: Traditional unstructured mesh format
+- **2D arrays**: Regular grid format (automatically raveled)
+- **Mixed formats**: 2D data with 1D coordinates (meshgrid created automatically)
+
+.. code-block:: python
+
+   # All of these work:
+   nr.plot(data_1d, lon_1d, lat_1d)           # Unstructured mesh
+   nr.plot(data_2d, lon_2d, lat_2d)           # Curvilinear grid
+   nr.plot(data_2d, lon_1d, lat_1d)           # Regular grid
+
+Warnings are issued when transformations are applied, so you know exactly what's happening.
+
+**Automatic Coordinate Extraction**
+
+When using xarray DataArrays, coordinates can be extracted automatically:
+
+.. code-block:: python
+
+   import xarray as xr
+
+   ds = xr.open_dataset("model_output.nc")
+   temp = ds.temperature.isel(time=0)
+
+   # Coordinates extracted from xarray metadata
+   nr.plot(temp)
+   nr.regrid(temp, resolution=0.5)
+
+Nereus recognizes common coordinate names used by various models:
+
+- FESOM/ICON: ``lon``, ``lat``, ``nod2d_lon``, ``nod2d_lat``
+- NEMO: ``nav_lon``, ``nav_lat``
+- MOM/GFDL: ``glon``, ``glat``, ``xt_ocean``, ``yt_ocean``
+- Generic: ``longitude``, ``latitude``, ``x``, ``y``
+
 Coordinate Systems
 ------------------
 

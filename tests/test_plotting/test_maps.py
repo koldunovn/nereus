@@ -184,3 +184,95 @@ class TestPlot:
         )
 
         plt.close(fig)
+
+
+class TestPlotInputFormats:
+    """Tests for plot function with various input formats."""
+
+    def test_2d_data_2d_coords(self, random_mesh_small):
+        """Test plot with 2D data and 2D coordinates."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        data_2d = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        with pytest.warns(UserWarning, match="Raveling 2D arrays"):
+            fig, ax, interp = plot(data_2d, lon_2d, lat_2d, resolution=10.0)
+
+        plt.close(fig)
+
+    def test_2d_data_1d_coords(self):
+        """Test plot with 2D data and 1D coordinates (meshgrid case)."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        data_2d = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            fig, ax, interp = plot(data_2d, lon_1d, lat_1d, resolution=10.0)
+
+        plt.close(fig)
+
+    def test_missing_coords_raises(self, synthetic_data):
+        """Test that missing coordinates raises clear error."""
+        data = synthetic_data
+
+        with pytest.raises(ValueError, match="lon and lat coordinates are required"):
+            plot(data)
+
+    def test_xarray_auto_coords(self):
+        """Test automatic coordinate extraction from xarray."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_vals, lat_vals)
+        data_vals = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"lat": lat_vals, "lon": lon_vals},
+            dims=["lat", "lon"],
+        )
+
+        # Should work without explicit lon/lat
+        with pytest.warns(UserWarning):  # Will warn about meshgrid
+            fig, ax, interp = plot(da, resolution=10.0)
+
+        plt.close(fig)
+
+    def test_xarray_partial_coords(self):
+        """Test partial coordinate override with xarray."""
+        xr = pytest.importorskip("xarray")
+
+        lon_vals = np.linspace(-180, 180, 36)
+        lat_vals = np.linspace(-90, 90, 18)
+        lon_2d, lat_2d = np.meshgrid(lon_vals, lat_vals)
+        data_vals = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
+
+        da = xr.DataArray(
+            data_vals,
+            coords={"lat": lat_vals, "lon": lon_vals},
+            dims=["lat", "lon"],
+        )
+
+        # Provide only lon, extract lat from xarray
+        custom_lon = np.linspace(-180, 180, 36)
+        with pytest.warns(UserWarning):
+            fig, ax, interp = plot(da, lon=custom_lon, resolution=10.0)
+
+        plt.close(fig)
+
+    def test_xarray_no_recognized_coords_raises(self):
+        """Test that xarray without recognized coords raises error."""
+        xr = pytest.importorskip("xarray")
+
+        data_vals = np.random.rand(18, 36)
+        da = xr.DataArray(
+            data_vals,
+            coords={"dim0": np.arange(18), "dim1": np.arange(36)},
+            dims=["dim0", "dim1"],
+        )
+
+        with pytest.raises(ValueError, match="lon and lat coordinates are required"):
+            plot(da, resolution=10.0)

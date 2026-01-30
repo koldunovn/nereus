@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+from nereus.core.grids import extract_coordinates
 from nereus.core.types import get_array_data, is_dask_array
 
 if TYPE_CHECKING:
@@ -95,11 +96,16 @@ def hovmoller(
     This function is dask-friendly: if inputs are dask arrays, the result
     will be lazy dask arrays.
 
+    If lat is not provided and data is an xarray DataArray, the function
+    will attempt to extract latitude coordinates automatically by looking
+    for common coordinate names (lat, latitude, y, etc.).
+
     Parameters
     ----------
     data : array_like
         Data array. For depth mode: shape (ntime, nlevels, npoints).
         For latitude mode: shape (ntime, npoints) or (ntime, nlevels, npoints).
+        If xarray DataArray, lat coordinates may be extracted automatically.
     area : array_like
         Grid cell areas in m^2. Can be either:
         - 1D array of shape (npoints,) for surface area (uniform across depth)
@@ -112,6 +118,7 @@ def hovmoller(
         Depth levels in meters. Required for mode="depth".
     lat : array_like, optional
         Latitude coordinates in degrees. Required for mode="latitude".
+        If None and mode="latitude", will attempt to extract from data (xarray only).
     mode : {"depth", "latitude"}
         Type of Hovmoller diagram.
     lat_bins : array_like, optional
@@ -141,6 +148,12 @@ def hovmoller(
     >>> t, z, hov = nr.hovmoller(temp_dask, mesh.area, time, depth, mode="depth")
     >>> hov.compute()  # triggers actual computation
     """
+    # Try to extract lat from xarray if not provided and needed for latitude mode
+    if lat is None and mode == "latitude":
+        _, extracted_lat = extract_coordinates(data)
+        if extracted_lat is not None:
+            lat = extracted_lat
+
     # Extract arrays, preserving dask for depth mode
     data_arr = get_array_data(data)
     area_arr = get_array_data(area)

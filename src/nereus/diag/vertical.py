@@ -762,12 +762,16 @@ def interpolate_to_depth(
     if is_lazy:
         import dask.array as da
 
+        # Interpolation requires all depth levels at once, so rechunk
+        # to have a single chunk along the levels axis
+        data_3d = data_3d.rechunk({1: -1})
+
         # For dask, use map_blocks for efficiency
         def _interp_chunk(data_chunk, depth_arr, target_arr):
             """Interpolate a chunk of data."""
             return _linear_interp_vectorized(data_chunk, depth_arr, target_arr)
 
-        # Get chunks from data
+        # Get chunks from data (after rechunking)
         data_chunks = data_3d.chunks
         result = da.map_blocks(
             _interp_chunk,

@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+from nereus.core.grids import extract_coordinates, prepare_input_arrays
 from nereus.plotting.projections import (
     get_data_bounds_for_projection,
     get_projection,
@@ -32,8 +33,8 @@ if TYPE_CHECKING:
 
 def plot(
     data: NDArray | "xr.DataArray",
-    lon: NDArray[np.floating],
-    lat: NDArray[np.floating],
+    lon: NDArray[np.floating] | None = None,
+    lat: NDArray[np.floating] | None = None,
     *,
     projection: str | ccrs.Projection = "pc",
     extent: tuple[float, float, float, float] | None = None,
@@ -59,14 +60,24 @@ def plot(
     This function regrids unstructured data to a regular grid and plots it
     on a map with the specified projection.
 
+    The function accepts various input formats and automatically transforms
+    them to 1D arrays for plotting:
+
+    - All 1D arrays of same size: used directly (no warning)
+    - 2D data with 2D lon/lat (same shape): all raveled to 1D
+    - 1D data with 2D lon/lat: lon/lat raveled to match data
+    - 2D data with 1D lon/lat: meshgrid created, then all raveled
+
+    A warning is issued whenever array transformations are applied.
+
     Parameters
     ----------
     data : array_like
-        1D array of data values at unstructured points.
+        Data values at unstructured points. Can be 1D or 2D array.
     lon : array_like
-        1D array of longitude coordinates.
+        Longitude coordinates. Can be 1D or 2D array.
     lat : array_like
-        1D array of latitude coordinates.
+        Latitude coordinates. Can be 1D or 2D array.
     projection : str or Projection
         Map projection. Options: "pc", "rob", "merc", "npstere", "spstere",
         "moll", "ortho", "lcc", or a Cartopy Projection.
@@ -117,10 +128,8 @@ def plot(
     >>> fig, ax, interp = nr.plot(temp, mesh.lon, mesh.lat)
     >>> fig, ax, _ = nr.plot(salinity, mesh.lon, mesh.lat, interpolator=interp)
     """
-    # Handle xarray DataArray
-    data_values = data.values if hasattr(data, "values") else np.asarray(data)
-    lon_arr = np.asarray(lon).ravel()
-    lat_arr = np.asarray(lat).ravel()
+    # Prepare inputs: handle various array shapes and validate
+    data_values, lon_arr, lat_arr = prepare_input_arrays(data, lon, lat)
 
     # Get projection
     proj = get_projection(projection)

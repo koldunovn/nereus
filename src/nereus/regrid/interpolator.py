@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from nereus.core.coordinates import lonlat_to_cartesian, meters_to_chord
-from nereus.core.grids import create_regular_grid
+from nereus.core.grids import create_regular_grid, prepare_coordinates, prepare_input_arrays
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -86,9 +86,10 @@ class RegridInterpolator:
 
     def __post_init__(self) -> None:
         """Initialize interpolation weights."""
-        # Ensure source coordinates are 1D numpy arrays
-        self.source_lon = np.asarray(self.source_lon).ravel()
-        self.source_lat = np.asarray(self.source_lat).ravel()
+        # Prepare source coordinates: handle 1D/2D and validate
+        self.source_lon, self.source_lat = prepare_coordinates(
+            self.source_lon, self.source_lat
+        )
 
         # Create target grid
         self.target_lon, self.target_lat = create_regular_grid(
@@ -214,14 +215,24 @@ def regrid(
     applies it. For repeated regridding with the same source grid, create
     a RegridInterpolator once and reuse it.
 
+    The function accepts various input formats and automatically transforms
+    them to 1D arrays for regridding:
+
+    - All 1D arrays of same size: used directly (no warning)
+    - 2D data with 2D lon/lat (same shape): all raveled to 1D
+    - 1D data with 2D lon/lat: lon/lat raveled to match data
+    - 2D data with 1D lon/lat: meshgrid created, then all raveled
+
+    A warning is issued whenever array transformations are applied.
+
     Parameters
     ----------
     data : array_like
-        Data to interpolate.
+        Data to interpolate. Can be 1D or 2D array.
     lon : array_like
-        Source grid longitude coordinates.
+        Source grid longitude coordinates. Can be 1D or 2D array.
     lat : array_like
-        Source grid latitude coordinates.
+        Source grid latitude coordinates. Can be 1D or 2D array.
     resolution : float or tuple of int
         Target grid resolution.
     method : {"nearest"}
@@ -242,9 +253,12 @@ def regrid(
     interpolator : RegridInterpolator
         The interpolator used (can be reused for other variables).
     """
+    # Prepare inputs: handle various array shapes and validate
+    data_values, lon_arr, lat_arr = prepare_input_arrays(data, lon, lat)
+
     interpolator = RegridInterpolator(
-        source_lon=lon,
-        source_lat=lat,
+        source_lon=lon_arr,
+        source_lat=lat_arr,
         resolution=resolution,
         method=method,
         influence_radius=influence_radius,
@@ -252,6 +266,6 @@ def regrid(
         lat_bounds=lat_bounds,
     )
 
-    regridded = interpolator(data, fill_value=fill_value)
+    regridded = interpolator(data_values, fill_value=fill_value)
 
     return regridded, interpolator

@@ -13,7 +13,10 @@ from nereus.core.coordinates import (
 from nereus.core.grids import (
     create_regular_grid,
     expand_bounds_for_polar,
+    extract_coordinates,
     grid_cell_area,
+    prepare_coordinates,
+    prepare_input_arrays,
 )
 from nereus.core.mesh import (
     DASK_THRESHOLD_POINTS,
@@ -67,6 +70,7 @@ __all__ = [
     "create_regular_grid",
     "ensure_lon_pm180",
     "expand_bounds_for_polar",
+    "extract_coordinates",
     "find_nearest",
     "get_array_data",
     "get_mesh_type",
@@ -81,6 +85,8 @@ __all__ = [
     "meters_to_chord",
     "normalize_lon",
     "points_in_polygon",
+    "prepare_coordinates",
+    "prepare_input_arrays",
     "should_use_dask",
     "subset_by_bbox",
     "validate_mesh",

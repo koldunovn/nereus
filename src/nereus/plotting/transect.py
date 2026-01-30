@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from nereus.core.coordinates import great_circle_path, lonlat_to_cartesian
+from nereus.core.grids import prepare_coordinates
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -44,14 +45,23 @@ def transect(
 ) -> tuple["Figure", "Axes"]:
     """Plot vertical transect along a great circle path.
 
+    The function accepts various coordinate formats and automatically transforms
+    them to 1D arrays:
+
+    - Both 1D with same size: used directly (no warning)
+    - Both 2D with same shape: raveled to 1D
+    - Both 1D with different sizes: meshgrid created, then raveled
+
+    A warning is issued whenever coordinate transformations are applied.
+
     Parameters
     ----------
     data : array_like
         2D array of data values with shape (nlevels, npoints).
     lon : array_like
-        1D array of longitude coordinates.
+        Longitude coordinates. Can be 1D or 2D array.
     lat : array_like
-        1D array of latitude coordinates.
+        Latitude coordinates. Can be 1D or 2D array.
     depth : array_like
         1D array of depth levels (positive downward).
     start : tuple of float
@@ -100,8 +110,9 @@ def transect(
     if hasattr(data, "values"):
         data = data.values
     data = np.asarray(data)
-    lon_arr = np.asarray(lon).ravel()
-    lat_arr = np.asarray(lat).ravel()
+
+    # Prepare coordinates: handle various array shapes and validate
+    lon_arr, lat_arr = prepare_coordinates(lon, lat)
     depth_arr = np.asarray(depth).ravel()
 
     # Generate transect path

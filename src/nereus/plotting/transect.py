@@ -61,7 +61,8 @@ def transect(
     Parameters
     ----------
     data : array_like
-        2D array of data values with shape (nlevels, npoints).
+        Data values with shape (nlevels, npoints) for 2D, or (nlevels, nlat, nlon)
+        for 3D regular grids. 3D data is automatically reshaped to 2D.
         If xarray DataArray, coordinates may be extracted automatically.
     lon : array_like, optional
         Longitude coordinates. Can be 1D or 2D array.
@@ -141,6 +142,13 @@ def transect(
     # Prepare coordinates: handle various array shapes and validate
     lon_arr, lat_arr = prepare_coordinates(lon, lat)
     depth_arr = np.asarray(depth).ravel()
+
+    # Handle 3D data on regular grids: (depth, lat, lon) -> (depth, lat*lon)
+    # This ensures indexing is consistent with the flattened coordinates
+    if data.ndim == 3:
+        nlevels, nlat, nlon = data.shape
+        # Reshape to (nlevels, npoints) where npoints = nlat * nlon
+        data = data.reshape(nlevels, -1)
 
     # Generate transect path
     path_lon, path_lat = great_circle_path(

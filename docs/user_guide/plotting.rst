@@ -285,10 +285,19 @@ Parameters
 ~~~~~~~~~~
 
 **data** : array-like
-   2D array with shape ``(nz, npoints)`` or 3D with time dimension.
+   Data array with one of the following shapes:
+
+   - ``(nlevels, npoints)`` - 2D array for unstructured meshes
+   - ``(nlevels, nlat, nlon)`` - 3D array for regular grids (automatically reshaped)
+
+   If xarray DataArray, coordinates may be extracted automatically.
 
 **lon, lat** : array-like
-   1D coordinate arrays.
+   Coordinate arrays. Can be:
+
+   - 1D arrays of same size (unstructured mesh coordinates)
+   - 1D arrays of different sizes (regular grid side coordinates - meshgrid created internally)
+   - 2D arrays of same shape (full coordinate arrays - raveled internally)
 
 **depth** : array-like
    1D array of depth levels (positive downward).
@@ -303,7 +312,48 @@ Parameters
    Depth limits as ``(min, max)``.
 
 **invert_depth** : bool, default True
-   Invert y-axis so depth increases downward.
+   Invert y-axis so depth increases downward (ocean convention).
+   Set to False for atmosphere (height increases upward).
+
+Flexible Input Formats
+~~~~~~~~~~~~~~~~~~~~~~
+
+Nereus automatically handles various input combinations:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Data Shape
+     - Lon/Lat
+     - Behavior
+   * - ``(nlevels, npoints)``
+     - 1D (same size)
+     - Used directly
+   * - ``(nlevels, nlat, nlon)``
+     - 1D (different sizes)
+     - Data reshaped to 2D, meshgrid created for coordinates
+   * - ``(nlevels, npoints)``
+     - 2D (same shape)
+     - Coordinates raveled to 1D
+
+Example with 3D regular grid data:
+
+.. code-block:: python
+
+   # 3D data with shape (depth, lat, lon)
+   # Common format from NetCDF files
+   temp = ds.temperature.values  # shape: (42, 173, 360)
+
+   fig, ax = nr.transect(
+       temp,
+       ds.lon.values,   # 1D: (360,)
+       ds.lat.values,   # 1D: (173,)
+       ds.depth.values,
+       start=(-30, -60),
+       end=(-30, 70),
+       n_points=200
+   )
 
 Example Transects
 ~~~~~~~~~~~~~~~~~

@@ -25,6 +25,8 @@ Functions for computing ocean diagnostics:
 - ``surface_mean``: Area-weighted mean for 2D fields (SST, SSS, single depth levels)
 - ``volume_mean``: Volume-weighted mean for 3D fields
 - ``heat_content``: Ocean heat content (total or map)
+- ``find_closest_depth``: Find index and value of closest depth level to target
+- ``interpolate_to_depth``: Interpolate 3D data to target depth levels
 
 .. automodule:: nereus.diag.vertical
    :members:
@@ -179,3 +181,26 @@ where:
 - :math:`T_{ref}` = reference temperature (default 0°C)
 - :math:`A_i` = cell area (m²)
 - :math:`\Delta z_k` = layer thickness (m)
+
+Find Closest Depth
+~~~~~~~~~~~~~~~~~~
+
+.. math::
+
+   i^* = \arg\min_i |z_i - z_{target}|
+
+Returns index :math:`i^*` and value :math:`z_{i^*}` of the closest depth level.
+
+Linear Depth Interpolation
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a target depth :math:`z_{target}` between model levels :math:`z_k` and :math:`z_{k+1}`:
+
+.. math::
+
+   X(z_{target}) = X_k + \frac{z_{target} - z_k}{z_{k+1} - z_k} \cdot (X_{k+1} - X_k)
+
+where:
+
+- :math:`X_k` = value at depth level :math:`k`
+- :math:`z_k` = depth of level :math:`k` (m)

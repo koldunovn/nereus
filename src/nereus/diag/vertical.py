@@ -766,22 +766,21 @@ def interpolate_to_depth(
         # to have a single chunk along the levels axis
         data_3d = data_3d.rechunk({1: -1})
 
-        # For dask, use map_blocks for efficiency
-        def _interp_chunk(data_chunk, depth_arr, target_arr):
-            """Interpolate a chunk of data."""
-            return _linear_interp_vectorized(data_chunk, depth_arr, target_arr)
+        # Create closure to capture depth_arr and target_arr (not passed as block args)
+        def _make_interp_func(depths, targets):
+            def _interp_chunk(data_chunk):
+                return _linear_interp_vectorized(data_chunk, depths, targets)
+            return _interp_chunk
+
+        interp_func = _make_interp_func(depth_arr, target_arr)
 
         # Get chunks from data (after rechunking)
         data_chunks = data_3d.chunks
         result = da.map_blocks(
-            _interp_chunk,
+            interp_func,
             data_3d,
-            depth_arr,
-            target_arr,
             dtype=data_3d.dtype,
             chunks=(data_chunks[0], (ntargets,), data_chunks[2]),
-            drop_axis=None,
-            new_axis=None,
         )
     else:
         result = _linear_interp_vectorized(data_3d, depth_arr, target_arr)

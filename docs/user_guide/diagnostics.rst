@@ -232,6 +232,67 @@ Heat content map (``output="map"``):
 
    OHC_i = \rho \cdot c_p \cdot \sum_{k} (T_{i,k} - T_{ref}) \cdot \Delta z_k
 
+Depth Utilities
+~~~~~~~~~~~~~~~
+
+Finding Closest Depth Level
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When comparing models with different vertical grids, use ``find_closest_depth``
+to find the index and value of the closest depth level to a target:
+
+.. code-block:: python
+
+   # Find model level closest to 100m
+   idx, val = nr.find_closest_depth(mesh.depth, 100)
+   print(f"Index: {idx}, Actual depth: {val}m")
+
+   # Check how far model depth is from target
+   print(f"Difference from target: {abs(val - 100):.1f}m")
+
+   # Compare multiple models at "100m"
+   idx1, val1 = nr.find_closest_depth(model1_depths, 100)
+   idx2, val2 = nr.find_closest_depth(model2_depths, 100)
+   print(f"Model 1 uses {val1}m, Model 2 uses {val2}m")
+
+Interpolating to Target Depths
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use ``interpolate_to_depth`` to interpolate 3D data to specific depth levels
+using linear interpolation:
+
+.. code-block:: python
+
+   # Interpolate temperature to 100m
+   temp_100m = nr.interpolate_to_depth(temp, None, None, mesh.depth, 100)
+
+   # Interpolate to multiple standard depths
+   standard_depths = [10, 50, 100, 200, 500, 1000]
+   temp_interp = nr.interpolate_to_depth(temp, None, None, mesh.depth, standard_depths)
+
+   # With coordinates for plotting
+   temp_100m, lon, lat = nr.interpolate_to_depth(
+       temp, mesh.lon, mesh.lat, mesh.depth, 100
+   )
+   fig, ax, _ = nr.plot(temp_100m.squeeze(), lon, lat)
+
+   # Compare models at the same depth level
+   temp_model1 = nr.interpolate_to_depth(temp1, None, None, depths1, 100)
+   temp_model2 = nr.interpolate_to_depth(temp2, None, None, depths2, 100)
+
+**Parameters:**
+
+- ``data``: 3D data with shape (nlevels, npoints) or (time, nlevels, npoints)
+- ``lon``, ``lat``: Coordinates (optional, returned if provided, pass None if not needed)
+- ``model_depths``: Depth levels of the input data (meters, positive downward)
+- ``target_depths``: Target depth(s) to interpolate to (scalar or array)
+
+**Notes:**
+
+- Linear interpolation is used between levels
+- Extrapolation outside model depth range generates a warning
+- Works with both numpy arrays and dask arrays (lazy computation)
+
 Depth Filtering
 ~~~~~~~~~~~~~~~
 
@@ -638,6 +699,12 @@ Summary Table
    * - ``heat_content``
      - Integrated OHC (total or map)
      - J (→ ZJ) or J/m²
+   * - ``find_closest_depth``
+     - Find closest depth level to target
+     - (index, value) tuple
+   * - ``interpolate_to_depth``
+     - Interpolate 3D data to target depths
+     - ndarray (ntargets, npoints)
    * - ``hovmoller``
      - Time-depth/lat arrays
      - Tuple of arrays

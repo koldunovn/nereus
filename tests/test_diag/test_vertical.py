@@ -7,7 +7,9 @@ from nereus.core.types import is_dask_array
 from nereus.diag.vertical import (
     RHO_SEAWATER,
     CP_SEAWATER,
+    find_closest_depth,
     heat_content,
+    interpolate_to_depth,
     surface_mean,
     volume_mean,
 )
@@ -853,3 +855,293 @@ class TestDaskCompatibility:
         assert computed[0, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
         assert computed[1, 0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 6000.0)
         assert computed[1, 1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 8000.0)
+
+
+class TestFindClosestDepth:
+    """Tests for find_closest_depth function."""
+
+    def test_find_closest_depth_exact_match(self):
+        """Test finding exact depth match."""
+        depths = np.array([0, 10, 25, 50, 100, 200, 500, 1000])
+        idx, val = find_closest_depth(depths, 100)
+        assert idx == 4
+        assert val == 100.0
+
+    def test_find_closest_depth_between_levels(self):
+        """Test finding closest depth when target is between levels."""
+        depths = np.array([0, 10, 25, 50, 100, 200, 500, 1000])
+        idx, val = find_closest_depth(depths, 75)
+        # 75 is closer to 50 (diff=25) than to 100 (diff=25), argmin returns first
+        # Actually 75-50=25, 100-75=25, so it's a tie. np.argmin returns first.
+        assert idx == 3 or idx == 4  # Either 50 or 100
+        assert val in [50.0, 100.0]
+
+    def test_find_closest_depth_closer_to_lower(self):
+        """Test finding closest when closer to lower level."""
+        depths = np.array([0, 10, 25, 50, 100, 200, 500, 1000])
+        idx, val = find_closest_depth(depths, 60)
+        # 60 is closer to 50 (diff=10) than to 100 (diff=40)
+        assert idx == 3
+        assert val == 50.0
+
+    def test_find_closest_depth_closer_to_upper(self):
+        """Test finding closest when closer to upper level."""
+        depths = np.array([0, 10, 25, 50, 100, 200, 500, 1000])
+        idx, val = find_closest_depth(depths, 90)
+        # 90 is closer to 100 (diff=10) than to 50 (diff=40)
+        assert idx == 4
+        assert val == 100.0
+
+    def test_find_closest_depth_below_minimum(self):
+        """Test finding closest when target is below minimum depth."""
+        depths = np.array([10, 25, 50, 100])
+        idx, val = find_closest_depth(depths, 5)
+        assert idx == 0
+        assert val == 10.0
+
+    def test_find_closest_depth_above_maximum(self):
+        """Test finding closest when target is above maximum depth."""
+        depths = np.array([10, 25, 50, 100])
+        idx, val = find_closest_depth(depths, 500)
+        assert idx == 3
+        assert val == 100.0
+
+    def test_find_closest_depth_list_input(self):
+        """Test with list input."""
+        depths = [0, 10, 25, 50, 100]
+        idx, val = find_closest_depth(depths, 30)
+        assert idx == 2
+        assert val == 25.0
+
+    def test_find_closest_depth_single_depth(self):
+        """Test with single depth level."""
+        depths = np.array([50.0])
+        idx, val = find_closest_depth(depths, 100)
+        assert idx == 0
+        assert val == 50.0
+
+
+class TestInterpolateToDepth:
+    """Tests for interpolate_to_depth function."""
+
+    def test_interpolate_to_depth_exact_level(self):
+        """Test interpolation to exact depth level."""
+        # 3 levels, 2 points
+        data = np.array([
+            [10.0, 20.0],  # 0m
+            [15.0, 25.0],  # 50m
+            [20.0, 30.0],  # 100m
+        ])
+        depths = np.array([0, 50, 100])
+
+        result = interpolate_to_depth(data, None, None, depths, 50)
+
+        assert result.shape == (1, 2)
+        assert result[0, 0] == pytest.approx(15.0)
+        assert result[0, 1] == pytest.approx(25.0)
+
+    def test_interpolate_to_depth_between_levels(self):
+        """Test linear interpolation between levels."""
+        data = np.array([
+            [10.0, 20.0],  # 0m
+            [20.0, 40.0],  # 100m
+        ])
+        depths = np.array([0, 100])
+
+        result = interpolate_to_depth(data, None, None, depths, 50)
+
+        # Linear interpolation: 10 + 0.5*(20-10) = 15, 20 + 0.5*(40-20) = 30
+        assert result.shape == (1, 2)
+        assert result[0, 0] == pytest.approx(15.0)
+        assert result[0, 1] == pytest.approx(30.0)
+
+    def test_interpolate_to_depth_multiple_targets(self):
+        """Test interpolation to multiple target depths."""
+        data = np.array([
+            [10.0, 20.0],  # 0m
+            [20.0, 40.0],  # 100m
+        ])
+        depths = np.array([0, 100])
+
+        result = interpolate_to_depth(data, None, None, depths, [25, 50, 75])
+
+        assert result.shape == (3, 2)
+        # At 25m: 10 + 0.25*10 = 12.5, 20 + 0.25*20 = 25
+        assert result[0, 0] == pytest.approx(12.5)
+        assert result[0, 1] == pytest.approx(25.0)
+        # At 50m: 15, 30
+        assert result[1, 0] == pytest.approx(15.0)
+        assert result[1, 1] == pytest.approx(30.0)
+        # At 75m: 10 + 0.75*10 = 17.5, 20 + 0.75*20 = 35
+        assert result[2, 0] == pytest.approx(17.5)
+        assert result[2, 1] == pytest.approx(35.0)
+
+    def test_interpolate_to_depth_with_coordinates(self):
+        """Test interpolation returns coordinates when provided."""
+        data = np.array([
+            [10.0, 20.0],
+            [20.0, 40.0],
+        ])
+        depths = np.array([0, 100])
+        lon = np.array([-30.0, -20.0])
+        lat = np.array([60.0, 65.0])
+
+        result, lon_out, lat_out = interpolate_to_depth(data, lon, lat, depths, 50)
+
+        assert result.shape == (1, 2)
+        np.testing.assert_array_equal(lon_out, lon)
+        np.testing.assert_array_equal(lat_out, lat)
+
+    def test_interpolate_to_depth_time_dimension(self):
+        """Test interpolation with time dimension."""
+        # (2 times, 3 levels, 2 points)
+        data = np.array([
+            [[10.0, 20.0], [15.0, 25.0], [20.0, 30.0]],  # Time 0
+            [[100.0, 200.0], [150.0, 250.0], [200.0, 300.0]],  # Time 1
+        ])
+        depths = np.array([0, 50, 100])
+
+        result = interpolate_to_depth(data, None, None, depths, [25, 75])
+
+        assert result.shape == (2, 2, 2)  # (time, targets, points)
+        # Time 0, depth 25: 12.5, 22.5
+        assert result[0, 0, 0] == pytest.approx(12.5)
+        assert result[0, 0, 1] == pytest.approx(22.5)
+
+    def test_interpolate_to_depth_extrapolation_warning(self):
+        """Test that extrapolation generates warning."""
+        import warnings
+
+        data = np.array([
+            [10.0, 20.0],
+            [20.0, 40.0],
+        ])
+        depths = np.array([50, 100])
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = interpolate_to_depth(data, None, None, depths, 25)
+            assert len(w) == 1
+            assert "Extrapolation" in str(w[0].message)
+
+    def test_interpolate_to_depth_decreasing_depths(self):
+        """Test interpolation with decreasing depth order."""
+        data = np.array([
+            [20.0, 30.0],  # 100m
+            [15.0, 25.0],  # 50m
+            [10.0, 20.0],  # 0m
+        ])
+        depths = np.array([100, 50, 0])  # Decreasing
+
+        result = interpolate_to_depth(data, None, None, depths, 25)
+
+        # At 25m (between 0 and 50): linear interp
+        # 10 + 0.5*5 = 12.5, 20 + 0.5*5 = 22.5
+        assert result.shape == (1, 2)
+        assert result[0, 0] == pytest.approx(12.5)
+        assert result[0, 1] == pytest.approx(22.5)
+
+    def test_interpolate_to_depth_single_target_scalar(self):
+        """Test interpolation with scalar target depth."""
+        data = np.array([
+            [10.0, 20.0],
+            [20.0, 40.0],
+        ])
+        depths = np.array([0, 100])
+
+        result = interpolate_to_depth(data, None, None, depths, 50.0)
+
+        assert result.shape == (1, 2)
+
+    def test_interpolate_to_depth_shape_validation(self):
+        """Test that mismatched depths raise error."""
+        data = np.array([
+            [10.0, 20.0],
+            [20.0, 40.0],
+        ])
+        depths = np.array([0, 50, 100])  # 3 levels but data has 2
+
+        with pytest.raises(ValueError, match="levels"):
+            interpolate_to_depth(data, None, None, depths, 50)
+
+
+class TestInterpolateToDepthDask:
+    """Tests for interpolate_to_depth with dask arrays."""
+
+    @pytest.fixture
+    def dask_deps(self):
+        """Import dask and xarray, skip if not available."""
+        da = pytest.importorskip("dask.array")
+        xr = pytest.importorskip("xarray")
+        return da, xr
+
+    def test_interpolate_to_depth_dask_basic(self, dask_deps):
+        """Test interpolation with dask array."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 20.0, 30.0],
+            [20.0, 40.0, 60.0],
+        ])
+        depths = np.array([0, 100])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(2, 2)),
+            dims=["level", "npoints"],
+        )
+
+        result = interpolate_to_depth(data, None, None, depths, 50)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed.shape == (1, 3)
+        assert computed[0, 0] == pytest.approx(15.0)
+        assert computed[0, 1] == pytest.approx(30.0)
+        assert computed[0, 2] == pytest.approx(45.0)
+
+    def test_interpolate_to_depth_dask_multiple_targets(self, dask_deps):
+        """Test dask interpolation to multiple depths."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [10.0, 20.0],
+            [20.0, 40.0],
+        ])
+        depths = np.array([0, 100])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(2, 1)),
+            dims=["level", "npoints"],
+        )
+
+        result = interpolate_to_depth(data, None, None, depths, [25, 50, 75])
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed.shape == (3, 2)
+        assert computed[0, 0] == pytest.approx(12.5)
+        assert computed[1, 0] == pytest.approx(15.0)
+        assert computed[2, 0] == pytest.approx(17.5)
+
+    def test_interpolate_to_depth_dask_with_time(self, dask_deps):
+        """Test dask interpolation with time dimension."""
+        da, xr = dask_deps
+
+        data_np = np.array([
+            [[10.0, 20.0], [20.0, 40.0]],
+            [[100.0, 200.0], [200.0, 400.0]],
+        ])
+        depths = np.array([0, 100])
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 2)),
+            dims=["time", "level", "npoints"],
+        )
+
+        result = interpolate_to_depth(data, None, None, depths, 50)
+
+        assert is_dask_array(result)
+        computed = result.compute()
+        assert computed.shape == (2, 1, 2)
+        assert computed[0, 0, 0] == pytest.approx(15.0)
+        assert computed[1, 0, 0] == pytest.approx(150.0)

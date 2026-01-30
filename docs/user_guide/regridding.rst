@@ -25,33 +25,57 @@ The function returns:
 Flexible Input Formats
 ----------------------
 
-Nereus accepts various input formats and handles the conversion automatically:
+Nereus accepts various input formats and handles the conversion automatically.
+The key distinction is whether lon/lat have the **same size** (unstructured mesh)
+or **different sizes** (regular grid side coordinates):
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 25 50
+   :widths: 30 25 45
 
-   * - Data
+   * - Data Shape
      - Lon/Lat
      - Behavior
-   * - 1D
-     - 1D (same size)
-     - Used directly (no warning)
-   * - 2D
-     - 2D (same shape)
+   * - ``(npoints,)``
+     - 1D, same size
+     - Unstructured mesh, used directly
+   * - ``(nlevels, npoints)``
+     - 1D, same size as npoints
+     - Multi-level unstructured (e.g., FESOM, ICON)
+   * - ``(nlat, nlon)``
+     - 1D, different sizes
+     - Regular grid: meshgrid created, data raveled
+   * - ``(nlevels, nlat, nlon)``
+     - 1D, different sizes
+     - Multi-level regular grid: spatial dims raveled
+   * - ``(ny, nx)``
+     - 2D, same shape
      - All raveled to 1D (warning issued)
-   * - 1D
-     - 2D
-     - Lon/lat raveled to match data (warning issued)
-   * - 2D
-     - 1D
-     - Meshgrid created, then all raveled (warning issued)
+
+Example with multi-level unstructured data (FESOM/ICON style):
+
+.. code-block:: python
+
+   # Multi-level unstructured mesh data
+   # data shape: (42, 196608) = (nlevels, npoints)
+   # lon/lat shape: (196608,) = (npoints,)
+
+   regridded, interp = nr.regrid(
+       fesom_data,           # (42, 196608)
+       mesh.longitude,       # (196608,)
+       mesh.latitude,        # (196608,)
+       resolution=1.0
+   )
+   # Result shape: (42, 180, 360) = (nlevels, nlat, nlon)
 
 Example with 2D regular grid data:
 
 .. code-block:: python
 
    # 2D data with 1D coordinates (like from NetCDF)
+   # data shape: (180, 360) = (nlat, nlon)
+   # lon shape: (360,), lat shape: (180,)
+
    data_2d = np.random.rand(180, 360)
    lon_1d = np.linspace(-179.5, 179.5, 360)
    lat_1d = np.linspace(-89.5, 89.5, 180)

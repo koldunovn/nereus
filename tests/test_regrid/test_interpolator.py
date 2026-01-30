@@ -227,6 +227,76 @@ class TestRegridInputFormats:
             regrid(da, resolution=10.0)
 
 
+class TestRegridMultiLevel:
+    """Tests for regrid function with multi-level unstructured data."""
+
+    def test_multilevel_unstructured(self, random_mesh_small):
+        """Test regrid with multi-level unstructured data (nlevels, npoints)."""
+        lon, lat = random_mesh_small
+        n_levels = 42
+        data = np.random.rand(n_levels, len(lon))
+
+        # Should work without warning (unstructured coords used directly)
+        result, interp = regrid(data, lon, lat, resolution=5.0)
+
+        # Result should have shape (nlevels, nlat, nlon)
+        assert result.shape == (n_levels,) + interp.target_lon.shape
+
+    def test_multilevel_unstructured_like_fesom(self):
+        """Test regrid with FESOM-like data shape (nlevels, npoints)."""
+        # Simulate FESOM-like unstructured mesh
+        n_points = 196608
+        n_levels = 42
+        rng = np.random.default_rng(42)
+
+        lon = rng.uniform(-180, 180, n_points)
+        lat = rng.uniform(-90, 90, n_points)
+        data = rng.random((n_levels, n_points))
+
+        # This should NOT create a meshgrid - coords are unstructured
+        result, interp = regrid(data, lon, lat, resolution=5.0)
+
+        # Result should have shape (nlevels, nlat, nlon)
+        assert result.shape == (n_levels,) + interp.target_lon.shape
+
+    def test_regular_grid_vs_unstructured_distinction(self):
+        """Test that regular grid and unstructured cases are handled correctly."""
+        # Regular grid case: lon/lat have DIFFERENT sizes
+        lon_1d = np.linspace(-180, 180, 36)  # nlon = 36
+        lat_1d = np.linspace(-90, 90, 18)    # nlat = 18
+        data_regular = np.random.rand(18, 36)  # (nlat, nlon)
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            result_regular, _ = regrid(data_regular, lon_1d, lat_1d, resolution=10.0)
+
+        # Unstructured case: lon/lat have SAME size
+        n_points = 648  # 18 * 36
+        lon_unstruct = np.random.uniform(-180, 180, n_points)
+        lat_unstruct = np.random.uniform(-90, 90, n_points)
+        data_unstruct = np.random.rand(n_points)
+
+        # Should not warn about meshgrid
+        result_unstruct, _ = regrid(data_unstruct, lon_unstruct, lat_unstruct, resolution=10.0)
+
+        # Both should produce 2D output
+        assert result_regular.ndim == 2
+        assert result_unstruct.ndim == 2
+
+    def test_3d_regular_grid(self):
+        """Test regrid with 3D regular grid data (nlevels, nlat, nlon)."""
+        lon_1d = np.linspace(-180, 180, 36)
+        lat_1d = np.linspace(-90, 90, 18)
+        n_levels = 10
+        data_3d = np.random.rand(n_levels, 18, 36)  # (nlevels, nlat, nlon)
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            result, interp = regrid(data_3d, lon_1d, lat_1d, resolution=10.0)
+
+        # Result should have shape (nlevels, nlat_target, nlon_target)
+        assert result.shape[0] == n_levels
+        assert result.shape[1:] == interp.target_lon.shape
+
+
 class TestInterpolator2DCoords:
     """Tests for RegridInterpolator with 2D coordinates."""
 

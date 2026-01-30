@@ -6,6 +6,7 @@ unstructured data (like FESOM, ICON) to regular lat/lon grids.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -18,7 +19,6 @@ from nereus.core.grids import (
     create_regular_grid,
     extract_coordinates,
     prepare_coordinates,
-    prepare_input_arrays,
 )
 
 if TYPE_CHECKING:
@@ -220,15 +220,20 @@ def regrid(
     applies it. For repeated regridding with the same source grid, create
     a RegridInterpolator once and reuse it.
 
-    The function accepts various input formats and automatically transforms
-    them to 1D arrays for regridding:
+    Supports multi-dimensional data where the last axis contains the spatial
+    points. For example:
 
-    - All 1D arrays of same size: used directly (no warning)
-    - 2D data with 2D lon/lat (same shape): all raveled to 1D
-    - 1D data with 2D lon/lat: lon/lat raveled to match data
-    - 2D data with 1D lon/lat: meshgrid created, then all raveled
+    - 1D data (npoints,): single field
+    - 2D data (nlevels, npoints): multi-level unstructured data (e.g., FESOM, ICON)
+    - ND data (*dims, npoints): arbitrary leading dimensions
 
-    A warning is issued whenever array transformations are applied.
+    Coordinate arrays can be:
+
+    - 1D arrays of same size: unstructured mesh coordinates (used directly)
+    - 1D arrays of different sizes: regular grid side coordinates (meshgrid created)
+    - 2D arrays of same shape: full coordinate arrays (raveled to 1D)
+
+    A warning is issued whenever coordinate transformations are applied.
 
     If lon/lat are not provided and data is an xarray DataArray, the function
     will attempt to extract coordinates automatically by looking for common
@@ -237,7 +242,8 @@ def regrid(
     Parameters
     ----------
     data : array_like
-        Data to interpolate. Can be 1D or 2D array.
+        Data to interpolate. Last axis must be npoints (matching coordinates).
+        Can be 1D (npoints,), 2D (nlevels, npoints), or ND (*dims, npoints).
         If xarray DataArray, coordinates may be extracted automatically.
     lon : array_like, optional
         Source grid longitude coordinates. Can be 1D or 2D array.
@@ -281,8 +287,71 @@ def regrid(
             "(lon/lat, longitude/latitude, x/y, etc.)."
         )
 
-    # Prepare inputs: handle various array shapes and validate
-    data_values, lon_arr, lat_arr = prepare_input_arrays(data, lon, lat)
+    # Handle xarray DataArray
+    if hasattr(data, "values"):
+        data_values = data.values
+    else:
+        data_values = np.asarray(data)
+
+    lon_arr = np.asarray(lon)
+    lat_arr = np.asarray(lat)
+
+    # Determine the data/coordinate format and prepare accordingly
+    # Key insight: for unstructured data, lon and lat have SAME size matching data's last dim
+    # For regular grids, lon and lat have DIFFERENT sizes matching data's last two dims
+
+    if lon_arr.ndim == 1 and lat_arr.ndim == 1:
+        if lon_arr.size == lat_arr.size:
+            # Case: Unstructured mesh coordinates (both 1D, same size)
+            # Data can be 1D (npoints,) or multi-level (nlevels, npoints)
+            npoints = data_values.shape[-1] if data_values.ndim >= 1 else data_values.size
+            if lon_arr.size != npoints:
+                raise ValueError(
+                    f"Coordinate size ({lon_arr.size}) must match data's last dimension ({npoints}). "
+                    f"Data shape: {data_values.shape}"
+                )
+            # Coordinates are ready, data stays as-is
+        else:
+            # Case: Regular grid with side coordinates (1D lon, 1D lat, different sizes)
+            # Data shape should be (..., nlat, nlon) or (nlat, nlon)
+            if data_values.ndim < 2:
+                raise ValueError(
+                    f"For regular grid coordinates (lon size {lon_arr.size}, lat size {lat_arr.size}), "
+                    f"data must be at least 2D, got shape {data_values.shape}"
+                )
+            nlat, nlon = data_values.shape[-2], data_values.shape[-1]
+            if lon_arr.size != nlon or lat_arr.size != nlat:
+                raise ValueError(
+                    f"Coordinate sizes (lon: {lon_arr.size}, lat: {lat_arr.size}) must match "
+                    f"data's last two dimensions (nlat: {nlat}, nlon: {nlon}). "
+                    f"Data shape: {data_values.shape}"
+                )
+            # Create meshgrid and ravel
+            warnings.warn(
+                f"Creating meshgrid from 1D lon ({lon_arr.size}) and lat ({lat_arr.size}) "
+                f"for data (shape {data_values.shape}), then raveling spatial dimensions.",
+                stacklevel=2,
+            )
+            lon_arr, lat_arr = np.meshgrid(lon_arr, lat_arr)
+            lon_arr = lon_arr.ravel()
+            lat_arr = lat_arr.ravel()
+            # Ravel the last two dimensions of data
+            if data_values.ndim == 2:
+                data_values = data_values.ravel()
+            else:
+                # For ND data, reshape (..., nlat, nlon) -> (..., nlat*nlon)
+                leading_shape = data_values.shape[:-2]
+                data_values = data_values.reshape(leading_shape + (-1,))
+    else:
+        # 2D coordinates - prepare them and handle data accordingly
+        lon_arr, lat_arr = prepare_coordinates(lon_arr, lat_arr)
+        # Ravel data if it matches the original 2D coordinate shape
+        if data_values.ndim >= 2 and data_values.shape[-2:] == np.asarray(lon).shape:
+            if data_values.ndim == 2:
+                data_values = data_values.ravel()
+            else:
+                leading_shape = data_values.shape[:-2]
+                data_values = data_values.reshape(leading_shape + (-1,))
 
     interpolator = RegridInterpolator(
         source_lon=lon_arr,

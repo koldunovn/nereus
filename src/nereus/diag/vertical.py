@@ -4,6 +4,8 @@ This module provides functions for computing ocean diagnostics:
 - surface_mean: Area-weighted mean for 2D fields (SST, SSS, etc.)
 - volume_mean: Volume-weighted mean in a depth range
 - heat_content: Ocean heat content
+- find_closest_depth: Find index and value of closest depth to target
+- interpolate_to_depth: Interpolate 3D data to target depths
 
 All functions are dask-friendly: if inputs are dask arrays, the result
 will be a lazy dask array that can be computed later with ``.compute()``.
@@ -586,3 +588,279 @@ def heat_content(
             return result
         else:
             return np.asarray(result)
+
+
+def find_closest_depth(
+    depths: NDArray[np.floating] | list | "xr.DataArray",
+    target: float,
+) -> tuple[int, float]:
+    """Find the index and value of the depth closest to a target depth.
+
+    This is useful when comparing multiple models with different depth levels
+    to find corresponding levels, and to assess how far model depths are
+    from target depths.
+
+    Parameters
+    ----------
+    depths : array_like
+        1D array of depth values (typically positive downward in meters).
+    target : float
+        Target depth value to find the closest match for.
+
+    Returns
+    -------
+    tuple[int, float]
+        A tuple of (index, value) where index is the position of the closest
+        depth in the input array, and value is the actual depth at that index.
+
+    Examples
+    --------
+    >>> depths = [0, 10, 25, 50, 100, 200, 500, 1000]
+    >>> idx, val = nr.find_closest_depth(depths, 100)
+    >>> print(f"Index: {idx}, Depth: {val}m")
+    Index: 4, Depth: 100.0m
+
+    >>> # Check how far model depth is from target
+    >>> idx, val = nr.find_closest_depth(depths, 75)
+    >>> print(f"Closest depth: {val}m, difference: {abs(val - 75)}m")
+    Closest depth: 50.0m, difference: 25.0m
+    """
+    # Extract array data
+    depth_arr = get_array_data(depths)
+    depth_arr = np.asarray(depth_arr).ravel()
+
+    # Find index of minimum absolute difference
+    idx = int(np.argmin(np.abs(depth_arr - target)))
+    value = float(depth_arr[idx])
+
+    return idx, value
+
+
+def interpolate_to_depth(
+    data: NDArray | "xr.DataArray",
+    lon: NDArray[np.floating] | "xr.DataArray" | None,
+    lat: NDArray[np.floating] | "xr.DataArray" | None,
+    model_depths: NDArray[np.floating] | list | "xr.DataArray",
+    target_depths: NDArray[np.floating] | list | float,
+) -> NDArray | tuple[NDArray, NDArray, NDArray]:
+    """Interpolate 3D data to target depth levels using linear interpolation.
+
+    Performs column-wise linear interpolation from model depth levels to
+    specified target depths. Values outside the model depth range are
+    extrapolated (with a warning for significant extrapolation).
+
+    This function is dask-friendly: if inputs are dask arrays, the result
+    will be a lazy dask array that can be computed later with ``.compute()``.
+
+    Parameters
+    ----------
+    data : array_like
+        3D data with shape (nlevels, npoints) or higher-dimensional with
+        the last two axes being (nlevels, npoints). For time series,
+        shape would be (ntime, nlevels, npoints).
+    lon : array_like or None
+        Longitude coordinates, shape (npoints,). If provided along with lat,
+        these are returned with the result for convenience. Pass None if
+        not needed.
+    lat : array_like or None
+        Latitude coordinates, shape (npoints,). If provided along with lon,
+        these are returned with the result for convenience. Pass None if
+        not needed.
+    model_depths : array_like
+        Depth levels of the input data in meters (positive downward),
+        shape (nlevels,).
+    target_depths : array_like or float
+        Target depth(s) to interpolate to in meters. Can be a single value
+        or an array of depths.
+
+    Returns
+    -------
+    ndarray or tuple
+        If lon and lat are None:
+            Interpolated data with shape (ntargets, npoints) or
+            (..., ntargets, npoints) for higher-dimensional input.
+            If target_depths is a scalar, ntargets=1.
+        If lon and lat are provided:
+            Tuple of (interpolated_data, lon, lat).
+
+    Examples
+    --------
+    >>> # Interpolate temperature to 100m depth (without coordinates)
+    >>> temp_100m = nr.interpolate_to_depth(temp, None, None, mesh.depth, 100)
+
+    >>> # Interpolate to multiple standard depths
+    >>> standard_depths = [10, 50, 100, 200, 500, 1000]
+    >>> temp_interp = nr.interpolate_to_depth(temp, None, None, mesh.depth, standard_depths)
+
+    >>> # With coordinates for plotting
+    >>> temp_100m, lon, lat = nr.interpolate_to_depth(
+    ...     temp, mesh.lon, mesh.lat, mesh.depth, 100
+    ... )
+    >>> nr.plot(temp_100m.squeeze(), lon, lat)
+
+    >>> # Compare models at the same depth
+    >>> temp_model1 = nr.interpolate_to_depth(temp1, None, None, depths1, 100)
+    >>> temp_model2 = nr.interpolate_to_depth(temp2, None, None, depths2, 100)
+    """
+    # Extract arrays, preserving dask
+    data_arr = get_array_data(data)
+    is_lazy = is_dask_array(data)
+
+    # Handle model depths
+    depth_arr = get_array_data(model_depths)
+    depth_arr = np.asarray(depth_arr).ravel()
+    nlevels = len(depth_arr)
+
+    # Validate data shape
+    if data_arr.shape[-2] != nlevels:
+        raise ValueError(
+            f"data has {data_arr.shape[-2]} levels but model_depths has {nlevels}"
+        )
+
+    # Handle target depths - ensure array
+    target_arr = np.atleast_1d(np.asarray(target_depths)).ravel()
+    ntargets = len(target_arr)
+
+    # Check for extrapolation
+    depth_min, depth_max = depth_arr.min(), depth_arr.max()
+    targets_below = target_arr[target_arr < depth_min]
+    targets_above = target_arr[target_arr > depth_max]
+    if len(targets_below) > 0 or len(targets_above) > 0:
+        extrap_msg = []
+        if len(targets_below) > 0:
+            extrap_msg.append(
+                f"{len(targets_below)} target(s) shallower than model minimum ({depth_min}m)"
+            )
+        if len(targets_above) > 0:
+            extrap_msg.append(
+                f"{len(targets_above)} target(s) deeper than model maximum ({depth_max}m)"
+            )
+        warnings.warn(
+            f"Extrapolation required: {'; '.join(extrap_msg)}. "
+            "Results may be unreliable outside model depth range.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # Get shape information
+    npoints = data_arr.shape[-1]
+    leading_dims = data_arr.shape[:-2]  # e.g., (ntime,) or ()
+
+    # Reshape data to (nbatch, nlevels, npoints) for uniform processing
+    if len(leading_dims) == 0:
+        # Shape: (nlevels, npoints)
+        data_3d = data_arr[np.newaxis, :, :]  # (1, nlevels, npoints)
+        nbatch = 1
+    else:
+        # Shape: (..., nlevels, npoints)
+        nbatch = int(np.prod(leading_dims))
+        data_3d = data_arr.reshape(nbatch, nlevels, npoints)
+
+    # Perform linear interpolation column by column
+    # For each target depth, find bracketing levels and interpolate
+
+    if is_lazy:
+        import dask.array as da
+
+        # For dask, use map_blocks for efficiency
+        def _interp_chunk(data_chunk, depth_arr, target_arr):
+            """Interpolate a chunk of data."""
+            return _linear_interp_vectorized(data_chunk, depth_arr, target_arr)
+
+        # Get chunks from data
+        data_chunks = data_3d.chunks
+        result = da.map_blocks(
+            _interp_chunk,
+            data_3d,
+            depth_arr,
+            target_arr,
+            dtype=data_3d.dtype,
+            chunks=(data_chunks[0], (ntargets,), data_chunks[2]),
+            drop_axis=None,
+            new_axis=None,
+        )
+    else:
+        result = _linear_interp_vectorized(data_3d, depth_arr, target_arr)
+
+    # Reshape result to match input dimensions
+    if len(leading_dims) == 0:
+        result = result[0, :, :]  # Remove batch dimension: (ntargets, npoints)
+    else:
+        result = result.reshape(*leading_dims, ntargets, npoints)
+
+    # Handle coordinate returns
+    if lon is not None and lat is not None:
+        lon_arr = get_array_data(lon)
+        lat_arr = get_array_data(lat)
+        if hasattr(lon_arr, "ravel"):
+            lon_arr = lon_arr.ravel()
+        if hasattr(lat_arr, "ravel"):
+            lat_arr = lat_arr.ravel()
+        return result, np.asarray(lon_arr), np.asarray(lat_arr)
+
+    return result
+
+
+def _linear_interp_vectorized(
+    data: NDArray,
+    depths: NDArray,
+    targets: NDArray,
+) -> NDArray:
+    """Vectorized linear interpolation for depth profiles.
+
+    Parameters
+    ----------
+    data : ndarray
+        Shape (nbatch, nlevels, npoints).
+    depths : ndarray
+        Shape (nlevels,), must be monotonic.
+    targets : ndarray
+        Shape (ntargets,).
+
+    Returns
+    -------
+    ndarray
+        Shape (nbatch, ntargets, npoints).
+    """
+    nbatch, nlevels, npoints = data.shape
+    ntargets = len(targets)
+
+    # Check if depths are monotonically increasing or decreasing
+    if depths[0] > depths[-1]:
+        # Depths are decreasing, flip for interpolation
+        depths = depths[::-1]
+        data = data[:, ::-1, :]
+
+    # Output array
+    result = np.empty((nbatch, ntargets, npoints), dtype=data.dtype)
+
+    for t_idx, target in enumerate(targets):
+        # Find bracketing indices
+        # np.searchsorted returns index where target would be inserted
+        idx_upper = np.searchsorted(depths, target)
+
+        if idx_upper == 0:
+            # Target is above/at shallowest level - extrapolate using first two levels
+            idx_lower, idx_upper = 0, 1
+        elif idx_upper >= nlevels:
+            # Target is below deepest level - extrapolate using last two levels
+            idx_lower, idx_upper = nlevels - 2, nlevels - 1
+        else:
+            idx_lower = idx_upper - 1
+
+        # Get bracketing depths and data
+        z_lower = depths[idx_lower]
+        z_upper = depths[idx_upper]
+        data_lower = data[:, idx_lower, :]  # (nbatch, npoints)
+        data_upper = data[:, idx_upper, :]  # (nbatch, npoints)
+
+        # Linear interpolation weight
+        if z_upper != z_lower:
+            weight = (target - z_lower) / (z_upper - z_lower)
+        else:
+            weight = 0.0
+
+        # Interpolate
+        result[:, t_idx, :] = data_lower + weight * (data_upper - data_lower)
+
+    return result

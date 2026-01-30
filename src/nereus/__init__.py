@@ -44,6 +44,10 @@ Examples
 >>> mean_sst = nr.surface_mean(sst, mesh["area"])
 >>> ohc = nr.heat_content(temp, mesh["area"], mesh["layer_thickness"])
 >>> mean_temp = nr.volume_mean(temp, mesh["area"], mesh["layer_thickness"], depth_max=500)
+
+# Depth utilities
+>>> idx, val = nr.find_closest_depth(mesh["depth"], 100)  # Find closest to 100m
+>>> temp_100m = nr.interpolate_to_depth(temp, lon, lat, mesh["depth"], 100)
 """
 
 from nereus._version import __version__
@@ -56,6 +60,7 @@ from nereus.plotting import plot, transect
 
 # Diagnostics (exported at top level)
 from nereus.diag import (
+    find_closest_depth,
     get_region_mask,
     heat_content,
     hovmoller,
@@ -68,6 +73,7 @@ from nereus.diag import (
     ice_volume,
     ice_volume_nh,
     ice_volume_sh,
+    interpolate_to_depth,
     list_available_regions,
     load_geojson,
     plot_hovmoller,
@@ -126,6 +132,8 @@ __all__ = [
     "surface_mean",
     "volume_mean",
     "heat_content",
+    "find_closest_depth",
+    "interpolate_to_depth",
     "hovmoller",
     "plot_hovmoller",
     # Region masks

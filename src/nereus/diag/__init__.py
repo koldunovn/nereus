@@ -21,7 +21,13 @@ from nereus.diag.ice import (
     ice_volume_sh,
 )
 from nereus.diag.regions import get_region_mask, list_available_regions, load_geojson
-from nereus.diag.vertical import heat_content, surface_mean, volume_mean
+from nereus.diag.vertical import (
+    find_closest_depth,
+    heat_content,
+    interpolate_to_depth,
+    surface_mean,
+    volume_mean,
+)
 
 __all__ = [
     # Ice diagnostics
@@ -38,6 +44,8 @@ __all__ = [
     "surface_mean",
     "volume_mean",
     "heat_content",
+    "find_closest_depth",
+    "interpolate_to_depth",
     # Hovmoller
     "hovmoller",
     "plot_hovmoller",

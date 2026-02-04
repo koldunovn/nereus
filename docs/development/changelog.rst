@@ -9,13 +9,44 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
+None.
+
+[0.3] - 2026-02-04
+------------------
+
+Added
+~~~~~
+
+**Mesh system**
+
+- Unified mesh representation as standardized ``xr.Dataset`` with mesh metadata utilities.
+- ``load_mesh`` auto-detection plus new model support for HEALPix, NEMO, and IFS TCO.
+- Spatial utilities: ``find_nearest``, ``subset_by_bbox``, ``points_in_polygon``,
+  ``haversine_distance``.
+- FESOM helpers: element center computation, node/element conversions, ``mask_by_depth``,
+  and ``nod_area_nans`` for depth-aware masking.
+
+**Diagnostics**
+
+- ``find_closest_depth``: Return index/value of closest depth to a target.
+- ``interpolate_to_depth``: Interpolate 3D data to target depths.
+
 Changed
 ~~~~~~~
 
-- ``plot_hovmoller``: Replaced ``log_y`` parameter with ``y_scale`` supporting multiple
-  scaling options for depth axis: ``"linear"`` (default), ``"sqrt"`` (square root),
-  ``"power"`` (configurable exponent), and ``"symlog"`` (symmetric log). These options
-  properly handle depth=0 and provide better control over surface layer visualization.
+- ``plot_hovmoller``: Added ``anomaly`` mode and replaced ``log_y`` with ``y_scale``
+  (``"linear"``, ``"sqrt"``, ``"power"``, ``"symlog"``) plus ``y_scale_kw`` controls.
+- Regridding/plotting coordinate handling: automatic lon/lat extraction and robust 1D/2D
+  preparation via ``extract_coordinates`` and ``prepare_coordinates``.
+- Dask handling improvements in vertical diagnostics and hovmoller (reduced graph bloat,
+  better support for distributed execution).
+
+Fixed
+~~~~~
+
+- Transect plotting now handles 3D data shaped ``(nlevels, nlat, nlon)`` by reshaping
+  before KDTree indexing.
+- Regridding/plotting fixes for mismatched coordinate shapes and 3D inputs.
 
 [0.2.1] - 2026-01-23
 --------------------

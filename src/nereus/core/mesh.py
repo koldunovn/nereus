@@ -7,6 +7,7 @@ standardized variable names.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -342,7 +343,10 @@ def mesh_from_arrays(
 ) -> xr.Dataset:
     """Create mesh from existing coordinate arrays.
 
-    Handles both 1D and 2D input arrays (2D will be flattened).
+    Handles 1D, 2D, and regular grid side coordinates. If lon and lat are
+    both 1D but have different sizes, they are treated as regular grid side
+    coordinates and expanded via meshgrid before flattening. 2D arrays are
+    flattened directly.
 
     Parameters
     ----------
@@ -363,8 +367,22 @@ def mesh_from_arrays(
     lon = np.asarray(lon, dtype=np.float64)
     lat = np.asarray(lat, dtype=np.float64)
 
+    # Handle 1D arrays of different sizes (regular grid side coordinates)
+    is_regular_grid = False
+    if lon.ndim == 1 and lat.ndim == 1 and lon.size != lat.size:
+        warnings.warn(
+            f"Creating meshgrid from 1D lon ({lon.size}) and lat ({lat.size}), "
+            "then raveling to 1D.",
+            stacklevel=2,
+        )
+        dlon = float(np.median(np.diff(lon)))
+        dlat = float(np.median(np.diff(lat)))
+        lon, lat = np.meshgrid(lon, lat)
+        lon = lon.ravel()
+        lat = lat.ravel()
+        is_regular_grid = True
     # Flatten if 2D
-    if lon.ndim == 2:
+    elif lon.ndim == 2:
         lon = lon.ravel()
         lat = lat.ravel()
 
@@ -376,7 +394,10 @@ def mesh_from_arrays(
 
     # Estimate area if not provided
     if area is None:
-        area = _estimate_area(lon, lat)
+        if is_regular_grid:
+            area = _compute_lonlat_cell_area(lat, dlon, dlat)
+        else:
+            area = _estimate_area(lon, lat)
     else:
         area = np.asarray(area, dtype=np.float64)
         if area.ndim == 2:

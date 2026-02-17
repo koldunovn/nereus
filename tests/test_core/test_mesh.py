@@ -135,6 +135,22 @@ class TestMeshFromArrays:
 
         assert mesh.sizes["npoints"] == 4
 
+    def test_1d_different_sizes_meshgrid(self):
+        """Test 1D arrays of different sizes are treated as regular grid side coordinates."""
+        lon = np.array([0, 1, 2, 3])  # 4 points
+        lat = np.array([10, 20, 30])   # 3 points
+
+        with pytest.warns(UserWarning, match="Creating meshgrid"):
+            mesh = mesh_from_arrays(lon, lat)
+
+        assert mesh.sizes["npoints"] == 12  # 4 * 3
+        # Check that meshgrid was applied correctly
+        lon_vals = mesh["lon"].values
+        lat_vals = mesh["lat"].values
+        expected_lon, expected_lat = np.meshgrid(lon, lat)
+        np.testing.assert_array_equal(lon_vals, expected_lon.ravel())
+        np.testing.assert_array_equal(lat_vals, expected_lat.ravel())
+
     def test_lon_normalized(self):
         """Test longitude is normalized."""
         lon = np.array([270, 180, 0])

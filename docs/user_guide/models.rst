@@ -436,6 +436,11 @@ Create mesh datasets from existing coordinate arrays:
 
    mesh = nr.mesh_from_arrays(lon_2d, lat_2d)
 
+   # 1D regular grid coordinates (different sizes) are expanded via meshgrid
+   # e.g., lon(360) and lat(173) from a regular grid dataset
+   ds = xr.open_dataset("regular_grid_data.nc")
+   mesh = nr.mesh_from_arrays(ds.lon, ds.lat)  # creates 360*173 = 62,280 points
+
 Using Meshes with Diagnostics
 -----------------------------
 

@@ -392,6 +392,36 @@ def prepare_coordinates(
     )
 
 
+def flatten_spatial(data):
+    """Flatten the last two spatial dimensions of an array into one.
+
+    Reshapes ``(..., nlat, nlon)`` to ``(..., npoints)`` where
+    ``npoints = nlat * nlon``.  Works with both NumPy and dask arrays.
+
+    Parameters
+    ----------
+    data : array_like
+        Array with at least 2 dimensions.
+
+    Returns
+    -------
+    array_like
+        Reshaped array with the last two dimensions merged.
+
+    Raises
+    ------
+    ValueError
+        If *data* has fewer than 2 dimensions.
+    """
+    if data.ndim < 2:
+        raise ValueError(
+            f"flatten_spatial requires at least 2 dimensions, got {data.ndim}D."
+        )
+    if data.ndim == 2:
+        return data.reshape(-1)
+    return data.reshape(data.shape[:-2] + (-1,))
+
+
 def create_regular_grid(
     resolution: float | tuple[int, int] = 1.0,
     lon_bounds: tuple[float, float] = (-180.0, 180.0),

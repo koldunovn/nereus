@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from nereus.core.coordinates import great_circle_path, lonlat_to_cartesian
-from nereus.core.grids import extract_coordinates, prepare_coordinates
+from nereus.core.grids import extract_coordinates, flatten_spatial, prepare_coordinates
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -146,9 +146,7 @@ def transect(
     # Handle 3D data on regular grids: (depth, lat, lon) -> (depth, lat*lon)
     # This ensures indexing is consistent with the flattened coordinates
     if data.ndim == 3:
-        nlevels, nlat, nlon = data.shape
-        # Reshape to (nlevels, npoints) where npoints = nlat * nlon
-        data = data.reshape(nlevels, -1)
+        data = flatten_spatial(data)
 
     # Generate transect path
     path_lon, path_lat = great_circle_path(

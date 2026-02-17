@@ -254,6 +254,68 @@ class TestHovmoller:
         # The result depends on which latitude bins the points fall into
 
 
+class TestHovmoller4DGrid:
+    """Tests for hovmoller with 4D regular-grid input."""
+
+    def test_hovmoller_depth_mode_4d_grid(self):
+        """Test depth mode with 4D (ntime, nlevels, nlat, nlon) input."""
+        # 2 times, 2 levels, 3 lat, 4 lon -> 12 points per level
+        data = np.ones((2, 2, 3, 4))
+        data[:, 0, :, :] = 10.0  # Level 0
+        data[:, 1, :, :] = 20.0  # Level 1
+        area = np.ones(12) * 1e6
+        depth = np.array([50.0, 150.0])
+
+        time_out, depth_out, result = hovmoller(
+            data, area, depth=depth, mode="depth"
+        )
+
+        assert result.shape == (2, 2)
+        assert result[0, 0] == pytest.approx(10.0)
+        assert result[0, 1] == pytest.approx(20.0)
+
+    def test_hovmoller_latitude_mode_4d_grid(self):
+        """Test latitude mode with 4D (ntime, nlevels, nlat, nlon) input."""
+        # 2 times, 1 level, 2 lat, 3 lon -> 6 points
+        data = np.ones((2, 1, 2, 3)) * 15.0
+        area = np.ones(6) * 1e6
+        lats = np.array([-45, -45, -45, 45, 45, 45])
+        lat_bins = np.array([-90, 0, 90])
+
+        time_out, lat_out, result = hovmoller(
+            data, area, lat=lats, lat_bins=lat_bins, mode="latitude"
+        )
+
+        assert result.shape[0] == 2
+        assert result.shape[1] == 2  # 2 lat bins
+
+    def test_hovmoller_depth_mode_dask_4d_grid(self):
+        """Test depth mode with dask 4D input stays lazy."""
+        da = pytest.importorskip("dask.array")
+        xr = pytest.importorskip("xarray")
+
+        data_np = np.ones((2, 2, 3, 4))
+        data_np[:, 0, :, :] = 10.0
+        data_np[:, 1, :, :] = 20.0
+
+        data = xr.DataArray(
+            da.from_array(data_np, chunks=(1, 2, 3, 4)),
+            dims=["time", "level", "lat", "lon"],
+        )
+        area = np.ones(12) * 1e6
+        depth = np.array([50.0, 150.0])
+
+        time_out, depth_out, result = hovmoller(
+            data, area, depth=depth, mode="depth"
+        )
+
+        assert is_dask_array(result)
+        result_computed = result.compute()
+        assert result_computed.shape == (2, 2)
+        assert result_computed[0, 0] == pytest.approx(10.0)
+        assert result_computed[0, 1] == pytest.approx(20.0)
+
+
 class TestPlotHovmoller:
     """Tests for plot_hovmoller function."""
 

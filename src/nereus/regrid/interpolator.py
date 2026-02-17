@@ -18,6 +18,7 @@ from nereus.core.coordinates import lonlat_to_cartesian, meters_to_chord
 from nereus.core.grids import (
     create_regular_grid,
     extract_coordinates,
+    flatten_spatial,
     prepare_coordinates,
 )
 
@@ -335,23 +336,13 @@ def regrid(
             lon_arr, lat_arr = np.meshgrid(lon_arr, lat_arr)
             lon_arr = lon_arr.ravel()
             lat_arr = lat_arr.ravel()
-            # Ravel the last two dimensions of data
-            if data_values.ndim == 2:
-                data_values = data_values.ravel()
-            else:
-                # For ND data, reshape (..., nlat, nlon) -> (..., nlat*nlon)
-                leading_shape = data_values.shape[:-2]
-                data_values = data_values.reshape(leading_shape + (-1,))
+            data_values = flatten_spatial(data_values)
     else:
         # 2D coordinates - prepare them and handle data accordingly
         lon_arr, lat_arr = prepare_coordinates(lon_arr, lat_arr)
         # Ravel data if it matches the original 2D coordinate shape
         if data_values.ndim >= 2 and data_values.shape[-2:] == np.asarray(lon).shape:
-            if data_values.ndim == 2:
-                data_values = data_values.ravel()
-            else:
-                leading_shape = data_values.shape[:-2]
-                data_values = data_values.reshape(leading_shape + (-1,))
+            data_values = flatten_spatial(data_values)
 
     interpolator = RegridInterpolator(
         source_lon=lon_arr,

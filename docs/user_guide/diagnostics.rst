@@ -342,6 +342,16 @@ Computing Hovmoller Data
        lat_bins=np.arange(-90, 91, 5)  # 5° bins
    )
 
+   # 4D regular-grid input is auto-flattened
+   # e.g. EN4 data with shape (ntime, nlevels, nlat, nlon)
+   time, depth_out, hov_data = nr.hovmoller(
+       temp_4d,        # (time, depth, nlat, nlon) — flattened automatically
+       area,
+       time=time_coord,
+       depth=depth_coord,
+       mode="depth"
+   )
+
 Plotting Hovmoller
 ~~~~~~~~~~~~~~~~~~
 

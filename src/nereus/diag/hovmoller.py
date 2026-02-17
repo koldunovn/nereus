@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
-from nereus.core.grids import extract_coordinates
+from nereus.core.grids import extract_coordinates, flatten_spatial
 from nereus.core.types import get_array_data, is_dask_array
 
 if TYPE_CHECKING:
@@ -105,6 +105,8 @@ def hovmoller(
     data : array_like
         Data array. For depth mode: shape (ntime, nlevels, npoints).
         For latitude mode: shape (ntime, npoints) or (ntime, nlevels, npoints).
+        4D arrays with shape (ntime, nlevels, nlat, nlon) are automatically
+        flattened to (ntime, nlevels, nlat*nlon) in both modes.
         If xarray DataArray, lat coordinates may be extracted automatically.
     area : array_like
         Grid cell areas in m^2. Can be either:
@@ -173,6 +175,10 @@ def hovmoller(
         if depth is None:
             raise ValueError("depth array required for mode='depth'")
         depth_arr = np.asarray(get_array_data(depth)).ravel()
+
+        # Flatten 4D regular-grid data: (ntime, nlevels, nlat, nlon) -> (ntime, nlevels, npoints)
+        if data_arr.ndim == 4:
+            data_arr = flatten_spatial(data_arr)
 
         # Expect data shape: (ntime, nlevels, npoints)
         if data_arr.ndim == 2:
@@ -276,6 +282,10 @@ def hovmoller(
         # Points outside the range get clipped to valid bin indices
         bin_indices = np.digitize(lat_arr, lat_bins) - 1
         bin_indices = np.clip(bin_indices, 0, nlat - 1)
+
+        # Flatten 4D regular-grid data: (ntime, nlevels, nlat, nlon) -> (ntime, nlevels, npoints)
+        if data_arr.ndim == 4:
+            data_arr = flatten_spatial(data_arr)
 
         # Handle data shape - need to work with original array (possibly dask)
         if data_arr.ndim == 1:

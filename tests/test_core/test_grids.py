@@ -6,6 +6,7 @@ import pytest
 from nereus.core.grids import (
     create_regular_grid,
     extract_coordinates,
+    flatten_spatial,
     grid_cell_area,
     prepare_coordinates,
     prepare_input_arrays,
@@ -394,3 +395,55 @@ class TestExtractCoordinates:
         assert lat is not None
         np.testing.assert_array_equal(lon, lon_2d)
         np.testing.assert_array_equal(lat, lat_2d)
+
+
+class TestFlattenSpatial:
+    """Tests for flatten_spatial function."""
+
+    def test_2d_to_1d(self):
+        """Test (nlat, nlon) -> (npoints,)."""
+        data = np.random.rand(18, 36)
+        result = flatten_spatial(data)
+        assert result.shape == (648,)
+
+    def test_3d_to_2d(self):
+        """Test (nlevels, nlat, nlon) -> (nlevels, npoints)."""
+        data = np.random.rand(10, 18, 36)
+        result = flatten_spatial(data)
+        assert result.shape == (10, 648)
+
+    def test_4d_to_3d(self):
+        """Test (ntime, nlevels, nlat, nlon) -> (ntime, nlevels, npoints)."""
+        data = np.random.rand(5, 10, 4, 6)
+        result = flatten_spatial(data)
+        assert result.shape == (5, 10, 24)
+
+    def test_1d_raises(self):
+        """Test that 1D input raises ValueError."""
+        with pytest.raises(ValueError, match="at least 2 dimensions"):
+            flatten_spatial(np.arange(10))
+
+    def test_0d_raises(self):
+        """Test that 0D input raises ValueError."""
+        with pytest.raises(ValueError, match="at least 2 dimensions"):
+            flatten_spatial(np.array(42.0))
+
+    def test_preserves_values(self):
+        """Test that values are preserved after flattening."""
+        data = np.arange(24).reshape(2, 3, 4)
+        result = flatten_spatial(data)
+        np.testing.assert_array_equal(result[0], np.arange(12))
+        np.testing.assert_array_equal(result[1], np.arange(12, 24))
+
+    def test_dask_array(self):
+        """Test that dask arrays stay lazy and have correct shape/values."""
+        da = pytest.importorskip("dask.array")
+        data_np = np.random.rand(3, 4, 5)
+        data_dask = da.from_array(data_np, chunks=(1, 4, 5))
+
+        result = flatten_spatial(data_dask)
+
+        # Should still be a dask array (lazy)
+        assert hasattr(result, "dask")
+        assert result.shape == (3, 20)
+        np.testing.assert_array_equal(result.compute(), data_np.reshape(3, 20))

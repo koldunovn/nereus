@@ -584,6 +584,67 @@ class TestPlotHovmoller:
                 y_scale="power", y_scale_kw={"exponent": 0}
             )
 
+    def test_plot_hovmoller_depth_edges_clamp_to_zero(self):
+        """Test that depth mode clamps the upper y-edge to 0, not negative."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(5)
+        # First depth at 5 m — without clamping, the upper edge would be
+        # 5 - (15-5)/2 = 0 or negative, causing artefacts with sqrt scale.
+        depth = np.array([5.0, 15.0, 25.0, 50.0, 100.0])
+        data = np.random.rand(5, 5)
+
+        fig, ax = plot_hovmoller(
+            time, depth, data, mode="depth", y_scale="sqrt"
+        )
+
+        # The pcolormesh QuadMesh y-coordinates should all be >= 0
+        mesh = ax.collections[0]
+        coords = mesh.get_coordinates()  # (ny+1, nx+1, 2)
+        y_coords = coords[:, :, 1]
+        assert y_coords.min() >= 0.0, (
+            f"Negative y-edge detected: {y_coords.min()}"
+        )
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_depth_edges_nonzero_start(self):
+        """Test cell edges when first depth is far from 0."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(3)
+        # Mimic a grid whose first level is well above 0
+        depth = np.array([50.0, 150.0, 500.0])
+        data = np.random.rand(3, 3)
+
+        fig, ax = plot_hovmoller(time, depth, data, mode="depth")
+
+        mesh = ax.collections[0]
+        coords = mesh.get_coordinates()
+        y_coords = coords[:, :, 1]
+        # Upper edge should be clamped to 0
+        assert y_coords.min() >= 0.0
+
+        plt.close(fig)
+
+    def test_plot_hovmoller_latitude_edges_not_clamped(self):
+        """Test that latitude mode does NOT clamp edges to 0."""
+        import matplotlib.pyplot as plt
+
+        time = np.arange(3)
+        lat = np.array([-60.0, -30.0, 0.0, 30.0, 60.0])
+        data = np.random.rand(3, 5)
+
+        fig, ax = plot_hovmoller(time, lat, data, mode="latitude")
+
+        mesh = ax.collections[0]
+        coords = mesh.get_coordinates()
+        y_coords = coords[:, :, 1]
+        # Lower edge should be -75 (= -60 - 15), not clamped
+        assert y_coords.min() < 0.0
+
+        plt.close(fig)
+
     def test_plot_hovmoller_anomaly_and_y_scale_combined(self):
         """Test Hovmoller plot with both anomaly and y_scale options."""
         import matplotlib.pyplot as plt

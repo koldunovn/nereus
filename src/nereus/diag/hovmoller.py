@@ -555,16 +555,47 @@ def plot_hovmoller(
     else:
         fig = ax.get_figure()
 
+    # Compute explicit cell edges for the y-axis so pcolormesh cells are
+    # well-defined.  For depth mode the upper boundary is clamped to 0
+    # (the ocean surface) to avoid a negative edge that causes artefacts
+    # with non-linear y-scales like sqrt.
+    y_edges = np.empty(len(y) + 1)
+    # Interior edges: midpoints between consecutive coordinates
+    y_edges[1:-1] = 0.5 * (y[:-1] + y[1:])
+    if mode == "depth":
+        # Surface boundary at 0 (not negative)
+        y_edges[0] = max(0.0, y[0] - 0.5 * (y[1] - y[0]))
+    else:
+        y_edges[0] = y[0] - 0.5 * (y[1] - y[0])
+    y_edges[-1] = y[-1] + 0.5 * (y[-1] - y[-2])
+
+    # Compute time edges for shading="flat" (needs n+1 edges for n cells)
+    time_num = np.arange(len(time), dtype=float) if np.issubdtype(
+        time.dtype, np.datetime64
+    ) else time.astype(float)
+    t_edges = np.empty(len(time) + 1)
+    t_edges[1:-1] = 0.5 * (time_num[:-1] + time_num[1:])
+    t_edges[0] = time_num[0] - 0.5 * (time_num[1] - time_num[0])
+    t_edges[-1] = time_num[-1] + 0.5 * (time_num[-1] - time_num[-2])
+    if np.issubdtype(time.dtype, np.datetime64):
+        # Convert back: compute offsets as timedeltas
+        base = time[0]
+        dt = time[1] - time[0]
+        t_edges_dt = np.empty(len(time) + 1, dtype=time.dtype)
+        t_edges_dt[1:-1] = time[:-1] + (time[1:] - time[:-1]) / 2
+        t_edges_dt[0] = time[0] - (time[1] - time[0]) / 2
+        t_edges_dt[-1] = time[-1] + (time[-1] - time[-2]) / 2
+        t_edges = t_edges_dt
+
     # Plot
-    # Use shading='nearest' to match coordinate arrays with data dimensions
     im = ax.pcolormesh(
-        time,
-        y,
+        t_edges,
+        y_edges,
         data.T,  # Transpose so y is on vertical axis
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        shading="nearest",
+        shading="flat",
         **kwargs,
     )
 

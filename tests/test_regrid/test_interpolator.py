@@ -297,6 +297,91 @@ class TestRegridMultiLevel:
         assert result.shape[1:] == interp.target_lon.shape
 
 
+class TestRegridAsXarray:
+    """Tests for regrid() with as_xarray=True."""
+
+    def test_returns_dataarray(self, random_mesh_small, synthetic_data):
+        """as_xarray=True returns an xr.DataArray."""
+        xr = pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        result, _ = regrid(synthetic_data, lon, lat, resolution=5.0, as_xarray=True)
+        assert isinstance(result, xr.DataArray)
+
+    def test_has_lat_lon_dims(self, random_mesh_small, synthetic_data):
+        """Output DataArray has lat and lon as the last two dimensions."""
+        pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        result, _ = regrid(synthetic_data, lon, lat, resolution=5.0, as_xarray=True)
+        assert result.dims[-2:] == ("lat", "lon")
+
+    def test_coordinate_values(self, random_mesh_small, synthetic_data):
+        """lat/lon coordinate values match the interpolator's target grid."""
+        pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        result, interp = regrid(synthetic_data, lon, lat, resolution=5.0, as_xarray=True)
+        np.testing.assert_array_equal(result.lat.values, interp.target_lat[:, 0])
+        np.testing.assert_array_equal(result.lon.values, interp.target_lon[0, :])
+
+    def test_false_returns_ndarray(self, random_mesh_small, synthetic_data):
+        """Default (as_xarray=False) still returns a plain ndarray."""
+        lon, lat = random_mesh_small
+        result, _ = regrid(synthetic_data, lon, lat, resolution=5.0)
+        assert isinstance(result, np.ndarray)
+
+    def test_leading_dims_numpy_input(self, random_mesh_small):
+        """Plain numpy input with leading dims produces correct dim names."""
+        pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        n_levels = 4
+        data = np.random.rand(n_levels, len(lon))
+        result, _ = regrid(data, lon, lat, resolution=5.0, as_xarray=True)
+        assert result.dims == ("dim_0", "lat", "lon")
+        assert result.shape[0] == n_levels
+
+    def test_leading_dims_xarray_input(self, random_mesh_small):
+        """xr.DataArray input: leading dim names and coords are preserved."""
+        xr = pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        n_levels = 4
+        depth = np.arange(n_levels, dtype=float)
+        data_vals = np.random.rand(n_levels, len(lon))
+        da = xr.DataArray(
+            data_vals,
+            dims=["depth", "npoints"],
+            coords={"depth": depth, "lon": ("npoints", lon), "lat": ("npoints", lat)},
+            name="temperature",
+            attrs={"units": "degC"},
+        )
+        result, _ = regrid(da, resolution=5.0, as_xarray=True)
+        assert result.dims == ("depth", "lat", "lon")
+        np.testing.assert_array_equal(result.depth.values, depth)
+        assert result.name == "temperature"
+        assert result.attrs == {"units": "degC"}
+
+    def test_var_name_and_attrs_from_xarray(self, random_mesh_small, synthetic_data):
+        """Variable name and attributes are copied from an xr.DataArray input."""
+        xr = pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        da = xr.DataArray(
+            synthetic_data,
+            dims=["npoints"],
+            coords={"lon": ("npoints", lon), "lat": ("npoints", lat)},
+            name="salinity",
+            attrs={"units": "psu", "long_name": "Sea surface salinity"},
+        )
+        result, _ = regrid(da, resolution=5.0, as_xarray=True)
+        assert result.name == "salinity"
+        assert result.attrs == {"units": "psu", "long_name": "Sea surface salinity"}
+
+    def test_plain_numpy_name_and_attrs(self, random_mesh_small, synthetic_data):
+        """Plain numpy input produces name='data' and empty attrs."""
+        pytest.importorskip("xarray")
+        lon, lat = random_mesh_small
+        result, _ = regrid(synthetic_data, lon, lat, resolution=5.0, as_xarray=True)
+        assert result.name == "data"
+        assert result.attrs == {}
+
+
 class TestInterpolator2DCoords:
     """Tests for RegridInterpolator with 2D coordinates."""
 

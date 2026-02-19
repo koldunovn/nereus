@@ -214,6 +214,7 @@ def regrid(
     fill_value: float = np.nan,
     lon_bounds: tuple[float, float] = (-180.0, 180.0),
     lat_bounds: tuple[float, float] = (-90.0, 90.0),
+    as_xarray: bool = False,
 ) -> tuple[NDArray[np.floating], RegridInterpolator]:
     """Regrid unstructured data to regular grid.
 
@@ -264,11 +265,19 @@ def regrid(
         Target grid longitude bounds.
     lat_bounds : tuple of float
         Target grid latitude bounds.
+    as_xarray : bool, default False
+        If True, wrap the regridded array in an ``xr.DataArray`` with
+        ``lat`` and ``lon`` as 1-D dimension coordinates.  Leading
+        dimensions (e.g. time, depth) and their coordinates are
+        preserved when the input is an ``xr.DataArray``.  The return
+        type of the tuple's first element changes from ``NDArray`` to
+        ``xr.DataArray``.
 
     Returns
     -------
-    regridded : ndarray
-        Regridded data.
+    regridded : ndarray or xr.DataArray
+        Regridded data. Returns ``xr.DataArray`` when ``as_xarray=True``,
+        otherwise ``ndarray``.
     interpolator : RegridInterpolator
         The interpolator used (can be reused for other variables).
     """
@@ -355,5 +364,39 @@ def regrid(
     )
 
     regridded = interpolator(data_values, fill_value=fill_value)
+
+    if as_xarray:
+        import xarray as xr
+
+        lat_1d = interpolator.target_lat[:, 0]
+        lon_1d = interpolator.target_lon[0, :]
+
+        if hasattr(data, "dims"):
+            n_leading = regridded.ndim - 2
+            leading_dim_names = list(data.dims[:n_leading])
+            leading_coords = {d: data.coords[d] for d in leading_dim_names if d in data.coords}
+            var_name = data.name or "data"
+            var_attrs = dict(data.attrs)
+        else:
+            n_leading = regridded.ndim - 2
+            leading_dim_names = [f"dim_{i}" for i in range(n_leading)]
+            leading_coords = {}
+            var_name = "data"
+            var_attrs = {}
+
+        dims = (*leading_dim_names, "lat", "lon")
+        coords = {
+            **leading_coords,
+            "lat": ("lat", lat_1d, {"units": "degrees_north", "standard_name": "latitude"}),
+            "lon": ("lon", lon_1d, {"units": "degrees_east", "standard_name": "longitude"}),
+        }
+
+        regridded = xr.DataArray(
+            regridded,
+            dims=dims,
+            coords=coords,
+            name=var_name,
+            attrs=var_attrs,
+        )
 
     return regridded, interpolator

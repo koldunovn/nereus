@@ -167,7 +167,7 @@ class TestRegridInputFormats:
         lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
         data_2d = np.sin(np.deg2rad(lat_2d)) * np.cos(np.deg2rad(lon_2d))
 
-        with pytest.warns(UserWarning, match="Raveling 2D arrays"):
+        with pytest.warns(UserWarning, match="Raveling 2D"):
             result, interp = regrid(data_2d, lon_2d, lat_2d, resolution=10.0)
 
         assert result.shape == interp.target_lon.shape

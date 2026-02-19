@@ -113,6 +113,40 @@ You can also override one coordinate while extracting the other:
    # Use custom lon, extract lat from xarray
    regridded, _ = nr.regrid(temp, lon=custom_lon, resolution=0.5)
 
+xarray Output
+-------------
+
+Pass ``as_xarray=True`` to receive the regridded result as an
+:class:`xarray.DataArray` with ``lat`` and ``lon`` already attached as
+1-D dimension coordinates, instead of a bare numpy array:
+
+.. code-block:: python
+
+   regridded, interp = nr.regrid(temp, resolution=0.5, as_xarray=True)
+
+   print(type(regridded))   # <class 'xarray.core.dataarray.DataArray'>
+   print(regridded.dims)    # ('lat', 'lon')
+   print(regridded.lat)     # 1-D coordinate in degrees_north
+   print(regridded.lon)     # 1-D coordinate in degrees_east
+
+When the input is an :class:`xarray.DataArray`, leading dimensions
+(e.g. ``time``, ``depth``) and their coordinate values are preserved
+automatically, and the variable name and attributes are copied across:
+
+.. code-block:: python
+
+   # Multi-level xarray input
+   temp_da = ds["temperature"]        # dims: (time, depth, npoints)
+
+   regridded, _ = nr.regrid(temp_da, resolution=0.5, as_xarray=True)
+
+   print(regridded.dims)             # ('time', 'depth', 'lat', 'lon')
+   print(regridded.name)             # 'temperature'
+   print(regridded.attrs)            # original variable attributes
+
+For plain numpy input with leading dimensions, auto-generated names
+``dim_0``, ``dim_1``, … are used for those axes.
+
 Resolution Options
 ------------------
 
@@ -286,20 +320,30 @@ Customize how missing data is handled:
 Saving Regridded Data
 ---------------------
 
-Export regridded data to NetCDF with xarray:
+The quickest way to export regridded data is with ``as_xarray=True``,
+which returns a :class:`xarray.DataArray` that is ready to save:
+
+.. code-block:: python
+
+   temp_da, interp = nr.regrid(temp, lon, lat, resolution=0.5, as_xarray=True)
+   salt_da, _      = nr.regrid(salt, lon, lat, resolution=0.5, as_xarray=True)
+
+   ds_regridded = xr.Dataset({"temp": temp_da, "salt": salt_da})
+   ds_regridded.to_netcdf("regridded_output.nc")
+
+If you are using :class:`~nereus.RegridInterpolator` directly and need to
+attach coordinates manually, the target grid arrays are available on the
+interpolator:
 
 .. code-block:: python
 
    import xarray as xr
 
-   # Create interpolator
    interpolator = nr.RegridInterpolator(lon, lat, resolution=0.5)
 
-   # Regrid data
    temp_reg = interpolator(temp)
    salt_reg = interpolator(salt)
 
-   # Create xarray Dataset
    ds_regridded = xr.Dataset(
        {
            "temp": (["lat", "lon"], temp_reg),
@@ -311,7 +355,6 @@ Export regridded data to NetCDF with xarray:
        }
    )
 
-   # Save to NetCDF
    ds_regridded.to_netcdf("regridded_output.nc")
 
 Performance Tips

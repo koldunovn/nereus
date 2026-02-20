@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from nereus.core.types import is_dask_array
 from nereus.diag.vertical import (
@@ -1145,3 +1146,183 @@ class TestInterpolateToDepthDask:
         assert computed.shape == (2, 1, 2)
         assert computed[0, 0, 0] == pytest.approx(15.0)
         assert computed[1, 0, 0] == pytest.approx(150.0)
+
+
+class TestAsXarray:
+    """Tests for as_xarray option on vertical diagnostic functions."""
+
+    # -- surface_mean --
+
+    def test_surface_mean_returns_dataarray(self):
+        """Test that as_xarray=True returns an xr.DataArray."""
+        data = np.array([10.0, 20.0, 30.0])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(20.0)
+        assert result.name == "surface_mean"
+
+    def test_surface_mean_false_returns_float(self):
+        """Test that default as_xarray=False still returns float."""
+        data = np.array([10.0, 20.0, 30.0])
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area, as_xarray=False)
+        assert isinstance(result, float)
+
+    def test_surface_mean_xarray_preserves_leading_dims(self):
+        """Test that leading dimensions are preserved from xarray input."""
+        time_coords = np.array([0, 1])
+        data = xr.DataArray(
+            np.array([
+                [10.0, 20.0, 30.0],
+                [40.0, 50.0, 60.0],
+            ]),
+            dims=["time", "npoints"],
+            coords={"time": time_coords},
+            name="sst",
+            attrs={"units": "degC"},
+        )
+        area = np.array([1e6, 1e6, 1e6])
+
+        result = surface_mean(data, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        np.testing.assert_array_equal(result.coords["time"].values, time_coords)
+        assert result.name == "sst"
+        assert result.attrs == {"units": "degC"}
+        assert result[0] == pytest.approx(20.0)
+        assert result[1] == pytest.approx(50.0)
+
+    # -- volume_mean --
+
+    def test_volume_mean_returns_dataarray(self):
+        """Test volume_mean with as_xarray=True."""
+        data = np.array([
+            [10.0, 10.0, 10.0],
+            [20.0, 20.0, 20.0],
+        ])
+        area = np.array([1e6, 1e6, 1e6])
+        thickness = np.array([10.0, 10.0])
+
+        result = volume_mean(data, area, thickness, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(15.0)
+        assert result.name == "volume_mean"
+
+    def test_volume_mean_xarray_preserves_metadata(self):
+        """Test volume_mean preserves xarray input metadata."""
+        time_coords = np.array([0, 1])
+        data = xr.DataArray(
+            np.array([
+                [[10.0, 10.0], [20.0, 20.0]],
+                [[30.0, 30.0], [40.0, 40.0]],
+            ]),
+            dims=["time", "level", "npoints"],
+            coords={"time": time_coords},
+            name="thetao",
+            attrs={"units": "degC"},
+        )
+        area = np.array([1e6, 1e6])
+        thickness = np.array([10.0, 10.0])
+
+        result = volume_mean(data, area, thickness, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        np.testing.assert_array_equal(result.coords["time"].values, time_coords)
+        assert result.name == "thetao"
+        assert result.attrs == {"units": "degC"}
+        assert result[0] == pytest.approx(15.0)
+        assert result[1] == pytest.approx(35.0)
+
+    # -- heat_content (total) --
+
+    def test_heat_content_total_returns_dataarray(self):
+        """Test heat_content total mode with as_xarray=True."""
+        temperature = np.array([
+            [10.0, 10.0],
+            [10.0, 10.0],
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        expected = RHO_SEAWATER * CP_SEAWATER * 10.0 * 4e8
+        assert float(result) == pytest.approx(expected, rel=1e-6)
+        assert result.name == "heat_content"
+
+    def test_heat_content_total_xarray_preserves_metadata(self):
+        """Test heat_content total preserves xarray metadata."""
+        time_coords = np.array([0, 1])
+        temperature = xr.DataArray(
+            np.array([
+                [[10.0, 10.0], [10.0, 10.0]],
+                [[20.0, 20.0], [20.0, 20.0]],
+            ]),
+            dims=["time", "level", "npoints"],
+            coords={"time": time_coords},
+            name="thetao",
+        )
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(temperature, area, thickness, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        assert result.name == "thetao"
+
+    # -- heat_content (map) --
+
+    def test_heat_content_map_returns_dataarray(self):
+        """Test heat_content map mode with as_xarray=True."""
+        temperature = np.array([
+            [10.0, 20.0],
+            [10.0, 20.0],
+        ])
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(
+            temperature, area, thickness, output="map", as_xarray=True,
+        )
+
+        assert isinstance(result, xr.DataArray)
+        assert result.shape == (2,)
+        assert result.name == "heat_content"
+        assert result[0] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 2000.0)
+        assert result[1] == pytest.approx(RHO_SEAWATER * CP_SEAWATER * 4000.0)
+
+    def test_heat_content_map_xarray_preserves_dims(self):
+        """Test heat_content map preserves leading + spatial dims from xarray."""
+        time_coords = np.array([0, 1])
+        temperature = xr.DataArray(
+            np.array([
+                [[10.0, 20.0], [10.0, 20.0]],
+                [[30.0, 40.0], [30.0, 40.0]],
+            ]),
+            dims=["time", "level", "npoints"],
+            coords={"time": time_coords},
+            name="thetao",
+            attrs={"units": "degC"},
+        )
+        area = np.array([1e6, 1e6])
+        thickness = np.array([100.0, 100.0])
+
+        result = heat_content(
+            temperature, area, thickness, output="map", as_xarray=True,
+        )
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time", "npoints")
+        np.testing.assert_array_equal(result.coords["time"].values, time_coords)
+        assert result.name == "thetao"
+        assert result.attrs == {"units": "degC"}
+        assert result.shape == (2, 2)

@@ -22,62 +22,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from nereus.core.types import get_array_data, is_dask_array
+from nereus.core.types import get_array_data, is_dask_array, wrap_as_xarray
 
 if TYPE_CHECKING:
     import xarray as xr
-
-
-def _wrap_as_xarray(
-    result: float | NDArray,
-    source_data: NDArray | "xr.DataArray",
-    default_name: str,
-) -> "xr.DataArray":
-    """Wrap a reduced result as an xarray DataArray.
-
-    After a spatial reduction (nansum over last axis), the result has
-    the leading dimensions of the input.  This helper preserves those
-    dimension names, coordinates, variable name, and attributes when
-    the input is an xarray DataArray.
-
-    Parameters
-    ----------
-    result : float or ndarray
-        The reduced result (scalar or array with leading dims).
-    source_data : array_like
-        The original input data (used to extract dimension metadata).
-    default_name : str
-        Variable name to use when the input has no name (e.g. numpy).
-    """
-    import xarray as xr
-
-    result_arr = np.atleast_1d(np.asarray(result))
-
-    if hasattr(source_data, "dims"):
-        # Input is xarray – preserve leading dimension info
-        n_leading = result_arr.ndim
-        leading_dim_names = list(source_data.dims[:n_leading])
-        leading_coords = {
-            d: source_data.coords[d]
-            for d in leading_dim_names
-            if d in source_data.coords
-        }
-        var_name = source_data.name or default_name
-        var_attrs = dict(source_data.attrs)
-    else:
-        n_leading = result_arr.ndim
-        leading_dim_names = [f"dim_{i}" for i in range(n_leading)]
-        leading_coords = {}
-        var_name = default_name
-        var_attrs = {}
-
-    return xr.DataArray(
-        result_arr.squeeze() if result_arr.size == 1 else result_arr,
-        dims=leading_dim_names if result_arr.size > 1 else None,
-        coords=leading_coords if result_arr.size > 1 else None,
-        name=var_name,
-        attrs=var_attrs,
-    )
 
 
 def ice_area(
@@ -167,7 +115,7 @@ def ice_area(
 
     # Return appropriate type
     if as_xarray:
-        return _wrap_as_xarray(result, concentration, "ice_area")
+        return wrap_as_xarray(result, concentration, "ice_area")
     elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:
@@ -294,7 +242,7 @@ def ice_volume(
 
     # Return appropriate type
     if as_xarray:
-        return _wrap_as_xarray(result, thickness, "ice_volume")
+        return wrap_as_xarray(result, thickness, "ice_volume")
     elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:
@@ -466,7 +414,7 @@ def ice_extent(
 
     # Return appropriate type
     if as_xarray:
-        return _wrap_as_xarray(result, concentration, "ice_extent")
+        return wrap_as_xarray(result, concentration, "ice_extent")
     elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:

@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from nereus.core.grids import extract_coordinates, flatten_spatial
-from nereus.core.types import get_array_data, is_dask_array
+from nereus.core.types import get_array_data, is_dask_array, wrap_as_xarray
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -87,7 +87,8 @@ def hovmoller(
     mode: Literal["depth", "latitude"] = "depth",
     lat_bins: NDArray[np.floating] | None = None,
     mask: NDArray[np.bool_] | None = None,
-) -> tuple[NDArray, NDArray, NDArray]:
+    as_xarray: bool = False,
+) -> tuple[NDArray, NDArray, NDArray] | "xr.DataArray":
     """Compute Hovmoller diagram data.
 
     Computes area-weighted means at each time step, binned by either depth
@@ -127,16 +128,20 @@ def hovmoller(
         Latitude bin edges for mode="latitude". Default is 5-degree bins.
     mask : array_like, optional
         Boolean mask for horizontal points, shape (npoints,). True = include.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with time and
+        depth/latitude dimension coordinates instead of a 3-tuple
+        (default False).
 
     Returns
     -------
-    time_out : ndarray
-        Time coordinates.
-    y_out : ndarray
-        Depth or latitude coordinates.
-    data_out : ndarray or dask.array
-        Hovmoller data array, shape (ntime, ny). For mode="depth" with dask
-        input, returns a dask array.
+    tuple or xr.DataArray
+        If as_xarray=False (default):
+            Tuple of (time_out, y_out, data_out) where data_out has shape
+            (ntime, ny).
+        If as_xarray=True:
+            xr.DataArray with dims ("time", "depth") or ("time", "latitude")
+            and corresponding coordinates.
 
     Examples
     --------
@@ -261,6 +266,11 @@ def hovmoller(
         else:
             time_out = np.asarray(get_array_data(time))
 
+        if as_xarray:
+            return _wrap_hovmoller_as_xarray(
+                result, time_out, depth_arr, "depth", data,
+            )
+
         return time_out, depth_arr, result
 
     elif mode == "latitude":
@@ -381,10 +391,66 @@ def hovmoller(
         else:
             time_out = np.asarray(get_array_data(time))
 
+        if as_xarray:
+            return _wrap_hovmoller_as_xarray(
+                result, time_out, lat_centers, "latitude", data,
+            )
+
         return time_out, lat_centers, result
 
     else:
         raise ValueError(f"Invalid mode: {mode}. Must be 'depth' or 'latitude'.")
+
+
+def _wrap_hovmoller_as_xarray(
+    result: NDArray,
+    time_out: NDArray,
+    y_out: NDArray,
+    y_name: str,
+    source_data: NDArray | "xr.DataArray",
+) -> "xr.DataArray":
+    """Wrap hovmoller result as an xarray DataArray.
+
+    Parameters
+    ----------
+    result : ndarray
+        Hovmoller data, shape (ntime, ny).
+    time_out : ndarray
+        Time coordinate values.
+    y_out : ndarray
+        Depth or latitude coordinate values.
+    y_name : str
+        Name for the y dimension ("depth" or "latitude").
+    source_data : array_like
+        Original input data for extracting name and attrs.
+    """
+    import xarray as xr
+
+    if hasattr(source_data, "name"):
+        var_name = source_data.name or "data"
+    else:
+        var_name = "data"
+    if hasattr(source_data, "attrs"):
+        var_attrs = dict(source_data.attrs)
+    else:
+        var_attrs = {}
+
+    y_attrs = {}
+    if y_name == "depth":
+        y_attrs = {"units": "m", "positive": "down"}
+    elif y_name == "latitude":
+        y_attrs = {"units": "degrees_north", "standard_name": "latitude"}
+
+    return xr.DataArray(
+        np.asarray(result),
+        dims=("time", y_name),
+        coords={
+            "time": ("time", time_out),
+            y_name: (y_name, y_out, y_attrs),
+        },
+        name=var_name,
+        attrs=var_attrs,
+    )
 
 
 def _apply_y_scale(

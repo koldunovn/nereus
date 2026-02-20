@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from nereus.core.types import get_array_data, is_dask_array
+from nereus.core.types import get_array_data, is_dask_array, wrap_as_xarray
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -34,7 +34,8 @@ def surface_mean(
     area: NDArray[np.floating],
     *,
     mask: NDArray[np.bool_] | None = None,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute area-weighted mean of a 2D field (single level).
 
     This is commonly used for surface fields like SST, SSS, or for
@@ -53,13 +54,16 @@ def surface_mean(
         Grid cell areas in m^2, shape (npoints,).
     mask : array_like, optional
         Boolean mask for horizontal points, shape (npoints,). True = include.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Area-weighted mean. Returns float for 1D numpy input (npoints,),
-        ndarray for higher-dimensional numpy input, or dask array if inputs
-        are dask.
+        ndarray for higher-dimensional numpy input, dask array if inputs
+        are dask, or xr.DataArray if as_xarray=True.
 
     Examples
     --------
@@ -119,7 +123,9 @@ def surface_mean(
     result = np.where(total_weight > 0, weighted_sum / total_weight, np.nan)
 
     # Return appropriate type
-    if is_lazy:
+    if as_xarray:
+        return wrap_as_xarray(result, data, "surface_mean")
+    elif is_lazy:
         return result
     elif np.ndim(result) == 0:
         return float(result)
@@ -136,7 +142,8 @@ def volume_mean(
     depth_min: float | None = None,
     depth_max: float | None = None,
     mask: NDArray[np.bool_] | None = None,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute volume-weighted mean of a quantity.
 
     This function is dask-friendly: if inputs are dask arrays, the result
@@ -166,12 +173,16 @@ def volume_mean(
         Maximum depth to include (meters, positive downward).
     mask : array_like, optional
         Boolean mask for horizontal points, shape (npoints,). True = include.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Volume-weighted mean. Returns float for 2D numpy input (nlevels, npoints),
-        ndarray for higher-dimensional numpy input, or dask array if inputs are dask.
+        ndarray for higher-dimensional numpy input, dask array if inputs are dask,
+        or xr.DataArray if as_xarray=True.
 
     Examples
     --------
@@ -322,7 +333,9 @@ def volume_mean(
     result = np.where(total_volume > 0, weighted_sum / total_volume, np.nan)
 
     # Return appropriate type
-    if is_lazy:
+    if as_xarray:
+        return wrap_as_xarray(result, data, "volume_mean", skip_dims=2)
+    elif is_lazy:
         return result
     elif np.ndim(result) == 0:
         return float(result)
@@ -343,7 +356,8 @@ def heat_content(
     rho: float = RHO_SEAWATER,
     cp: float = CP_SEAWATER,
     output: str = "total",
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute ocean heat content.
 
     Heat content can be computed as either:
@@ -387,14 +401,18 @@ def heat_content(
         - "total": Total heat content in Joules (scalar per timestep)
         - "map": Heat content per unit area in J/m² (2D field at each point)
         Default is "total".
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         If output="total": Ocean heat content in Joules.
         If output="map": Heat content per unit area in J/m², shape (npoints,)
         or (..., npoints) for higher-dimensional input.
-        Returns a dask array if inputs are dask.
+        Returns a dask array if inputs are dask, or xr.DataArray if
+        as_xarray=True.
 
     Examples
     --------
@@ -552,7 +570,9 @@ def heat_content(
         result = rho * cp * heat
 
         # Return appropriate type
-        if is_lazy:
+        if as_xarray:
+            return wrap_as_xarray(result, temperature, "heat_content", skip_dims=2)
+        elif is_lazy:
             return result
         elif np.ndim(result) == 0:
             return float(result)
@@ -584,10 +604,56 @@ def heat_content(
         result = rho * cp * heat_per_area
 
         # Return appropriate type
-        if is_lazy:
+        if as_xarray:
+            return _wrap_map_as_xarray(result, temperature, "heat_content")
+        elif is_lazy:
             return result
         else:
             return np.asarray(result)
+
+
+def _wrap_map_as_xarray(
+    result: NDArray,
+    source_data: NDArray | "xr.DataArray",
+    default_name: str,
+) -> "xr.DataArray":
+    """Wrap a partial-reduction result (depth removed, spatial kept) as xarray.
+
+    For heat_content(output="map"), the input has shape (..., nlevels, npoints)
+    and the result has shape (..., npoints).  The leading dims plus the last
+    spatial dim should be preserved.
+    """
+    import xarray as xr
+
+    result_arr = np.asarray(result)
+
+    if hasattr(source_data, "dims"):
+        # Input dims: e.g. ("time", "level", "npoints")
+        # Result dims: e.g. ("time", "npoints") — skip the second-to-last
+        input_dims = list(source_data.dims)
+        # Keep all dims except the second-to-last (depth/level axis)
+        output_dims = input_dims[:-2] + input_dims[-1:]
+        output_coords = {
+            d: source_data.coords[d]
+            for d in output_dims
+            if d in source_data.coords
+        }
+        var_name = source_data.name or default_name
+        var_attrs = dict(source_data.attrs)
+    else:
+        n = result_arr.ndim
+        output_dims = [f"dim_{i}" for i in range(n)]
+        output_coords = {}
+        var_name = default_name
+        var_attrs = {}
+
+    return xr.DataArray(
+        result_arr,
+        dims=output_dims,
+        coords=output_coords,
+        name=var_name,
+        attrs=var_attrs,
+    )
 
 
 def find_closest_depth(

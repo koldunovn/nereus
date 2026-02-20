@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from nereus.core.types import is_dask_array
 from nereus.diag.hovmoller import hovmoller, plot_hovmoller
@@ -881,3 +882,100 @@ class TestDaskCompatibility:
         # Should return numpy array, not dask
         assert not is_dask_array(result)
         assert isinstance(result, np.ndarray)
+
+
+class TestHovmollerAsXarray:
+    """Tests for hovmoller as_xarray option."""
+
+    def test_depth_mode_returns_dataarray(self):
+        """Test hovmoller depth mode with as_xarray=True."""
+        data = np.array([
+            [[10.0, 10.0, 10.0, 10.0], [20.0, 20.0, 20.0, 20.0]],
+            [[11.0, 11.0, 11.0, 11.0], [21.0, 21.0, 21.0, 21.0]],
+        ])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        depth = np.array([50.0, 150.0])
+        time = np.array([0, 1])
+
+        result = hovmoller(
+            data, area, time=time, depth=depth, mode="depth", as_xarray=True,
+        )
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time", "depth")
+        assert result.shape == (2, 2)
+        np.testing.assert_array_equal(result.coords["time"].values, time)
+        np.testing.assert_array_equal(result.coords["depth"].values, depth)
+        assert result[0, 0] == pytest.approx(10.0)
+        assert result[0, 1] == pytest.approx(20.0)
+
+    def test_latitude_mode_returns_dataarray(self):
+        """Test hovmoller latitude mode with as_xarray=True."""
+        npoints = 100
+        np.random.seed(42)
+        lat = np.random.uniform(-90, 90, npoints)
+        area = np.ones(npoints) * 1e6
+        data = np.stack([lat, lat + 1])  # 2 timesteps
+
+        lat_bins = np.array([-90, 0, 90])
+        time = np.array([0, 1])
+
+        result = hovmoller(
+            data, area, time=time, lat=lat, mode="latitude",
+            lat_bins=lat_bins, as_xarray=True,
+        )
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time", "latitude")
+        assert result.shape == (2, 2)
+        np.testing.assert_array_equal(result.coords["time"].values, time)
+
+    def test_depth_mode_false_returns_tuple(self):
+        """Test that default as_xarray=False still returns a tuple."""
+        data = np.array([
+            [[10.0, 10.0], [20.0, 20.0]],
+        ])
+        area = np.array([1e6, 1e6])
+        depth = np.array([50.0, 150.0])
+
+        result = hovmoller(data, area, depth=depth, mode="depth", as_xarray=False)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+
+    def test_depth_mode_preserves_xarray_metadata(self):
+        """Test that variable name and attrs are preserved from xarray input."""
+        data = xr.DataArray(
+            np.array([
+                [[10.0, 10.0], [20.0, 20.0]],
+                [[11.0, 11.0], [21.0, 21.0]],
+            ]),
+            dims=["time", "level", "npoints"],
+            name="thetao",
+            attrs={"units": "degC"},
+        )
+        area = np.array([1e6, 1e6])
+        depth = np.array([50.0, 150.0])
+        time = np.array([0, 1])
+
+        result = hovmoller(
+            data, area, time=time, depth=depth, mode="depth", as_xarray=True,
+        )
+
+        assert isinstance(result, xr.DataArray)
+        assert result.name == "thetao"
+        assert result.attrs == {"units": "degC"}
+
+    def test_depth_coords_have_attrs(self):
+        """Test that depth coordinate has units metadata."""
+        data = np.array([
+            [[10.0, 10.0], [20.0, 20.0]],
+        ])
+        area = np.array([1e6, 1e6])
+        depth = np.array([50.0, 150.0])
+
+        result = hovmoller(
+            data, area, depth=depth, mode="depth", as_xarray=True,
+        )
+
+        assert result.coords["depth"].attrs["units"] == "m"

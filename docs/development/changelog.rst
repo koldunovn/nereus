@@ -12,10 +12,16 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 Added
 ~~~~~
 
-- ``as_xarray`` option for all sea ice diagnostic functions (``ice_area``,
-  ``ice_volume``, ``ice_extent``, and their ``_nh`` / ``_sh`` variants) to
-  return results as ``xr.DataArray`` with preserved dimension names,
-  coordinates, and attributes from the input.
+- ``as_xarray`` option for all diagnostic functions to return results as
+  ``xr.DataArray`` with preserved dimension names, coordinates, and
+  attributes from the input:
+
+  - Sea ice: ``ice_area``, ``ice_volume``, ``ice_extent``, and their
+    ``_nh`` / ``_sh`` hemisphere variants
+  - Ocean: ``surface_mean``, ``volume_mean``, ``heat_content``
+    (both ``"total"`` and ``"map"`` modes)
+  - Hovmoller: ``hovmoller`` (returns DataArray with time + depth/latitude
+    coordinates instead of a 3-tuple)
 
 [0.3.0] - 2026-02-04
 ------------------

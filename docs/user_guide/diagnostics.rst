@@ -503,6 +503,40 @@ where ocean dynamics are most active. The ``y_scale`` parameter supports several
      - Linear near zero, log at depth
      - When you want true linear spacing in mixed layer
 
+xarray Output for Ocean Diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Like the sea ice functions, ocean diagnostic functions also support
+``as_xarray=True``:
+
+.. code-block:: python
+
+   # Surface mean SST as DataArray with time coordinate preserved
+   mean_sst = nr.surface_mean(ds.sst, area, as_xarray=True)
+   print(mean_sst.dims)   # ('time',)
+
+   # Volume-mean temperature in upper 700m
+   mean_temp = nr.volume_mean(
+       ds.thetao, area, thickness, depth,
+       depth_max=700, as_xarray=True
+   )
+
+   # Heat content (total mode)
+   ohc = nr.heat_content(ds.thetao, area, thickness, as_xarray=True)
+
+   # Heat content map (preserves spatial dimension)
+   ohc_map = nr.heat_content(
+       ds.thetao, area, thickness, output="map", as_xarray=True
+   )
+   print(ohc_map.dims)   # ('time', 'npoints')
+
+   # Hovmoller returns a single DataArray instead of a 3-tuple
+   hov = nr.hovmoller(
+       ds.thetao, area, time=ds.time, depth=depth,
+       mode="depth", as_xarray=True
+   )
+   print(hov.dims)   # ('time', 'depth')
+
 Working with Time Series
 ------------------------
 

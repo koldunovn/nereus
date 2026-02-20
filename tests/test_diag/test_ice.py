@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from nereus.diag.ice import (
     ice_area,
@@ -490,3 +491,163 @@ class TestHemisphereHelpers:
         # Time 1: NH = 1.0+0.0 = 1.0e6, SH = 1.0+0.0 = 1.0e6
         assert result_nh[1] == pytest.approx(1e6)
         assert result_sh[1] == pytest.approx(1e6)
+
+
+class TestAsXarray:
+    """Tests for as_xarray option on all ice diagnostic functions."""
+
+    def test_ice_area_returns_dataarray(self):
+        """Test that as_xarray=True returns an xr.DataArray."""
+        concentration = np.array([0.0, 0.5, 0.8, 1.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_area(concentration, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(2.3e6)
+
+    def test_ice_area_false_returns_float(self):
+        """Test that as_xarray=False (default) still returns float."""
+        concentration = np.array([0.0, 0.5, 0.8, 1.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_area(concentration, area, as_xarray=False)
+
+        assert isinstance(result, float)
+
+    def test_ice_area_xarray_preserves_leading_dims(self):
+        """Test that leading dimensions are preserved from xarray input."""
+        time_coords = np.array([0, 1, 2])
+        concentration = xr.DataArray(
+            np.array([
+                [0.0, 0.5, 0.8, 1.0],
+                [1.0, 1.0, 0.0, 0.0],
+                [0.5, 0.5, 0.5, 0.5],
+            ]),
+            dims=["time", "npoints"],
+            coords={"time": time_coords},
+            name="siconc",
+            attrs={"units": "1"},
+        )
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_area(concentration, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        np.testing.assert_array_equal(result.coords["time"].values, time_coords)
+        assert result.name == "siconc"
+        assert result.attrs == {"units": "1"}
+        assert result[0] == pytest.approx(2.3e6)
+        assert result[1] == pytest.approx(2e6)
+
+    def test_ice_area_numpy_leading_dims(self):
+        """Test that numpy input gets auto-generated dimension names."""
+        concentration = np.array([
+            [0.0, 0.5, 0.8, 1.0],
+            [1.0, 1.0, 0.0, 0.0],
+        ])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_area(concentration, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("dim_0",)
+        assert result.name == "ice_area"
+
+    def test_ice_volume_returns_dataarray(self):
+        """Test ice_volume with as_xarray=True."""
+        thickness = np.array([0.0, 1.0, 2.0, 3.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_volume(thickness, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(6e6)
+        assert result.name == "ice_volume"
+
+    def test_ice_volume_xarray_preserves_metadata(self):
+        """Test ice_volume preserves xarray input metadata."""
+        thickness = xr.DataArray(
+            np.array([[1.0, 1.0, 1.0, 1.0], [2.0, 2.0, 0.0, 0.0]]),
+            dims=["time", "npoints"],
+            coords={"time": [0, 1]},
+            name="sithick",
+            attrs={"units": "m"},
+        )
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+
+        result = ice_volume(thickness, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        assert result.name == "sithick"
+        assert result.attrs == {"units": "m"}
+
+    def test_ice_extent_returns_dataarray(self):
+        """Test ice_extent with as_xarray=True."""
+        concentration = np.array([0.0, 0.10, 0.15, 0.20, 1.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6, 1e6])
+
+        result = ice_extent(concentration, area, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(3e6)
+        assert result.name == "ice_extent"
+
+    def test_ice_area_nh_returns_dataarray(self):
+        """Test hemisphere helper with as_xarray=True."""
+        concentration = np.array([0.5, 0.5, 0.5, 0.5])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_area_nh(concentration, area, lat, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(1e6)
+
+    def test_ice_extent_nh_returns_dataarray(self):
+        """Test ice_extent_nh with as_xarray=True."""
+        concentration = np.array([0.5, 0.1, 0.5, 0.1])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_extent_nh(concentration, area, lat, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(1e6)
+
+    def test_ice_volume_nh_returns_dataarray(self):
+        """Test ice_volume_nh with as_xarray=True."""
+        thickness = np.array([2.0, 2.0, 2.0, 2.0])
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_volume_nh(thickness, area, lat, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert float(result) == pytest.approx(4e6)
+
+    def test_hemisphere_helpers_xarray_multidimensional(self):
+        """Test hemisphere helpers with as_xarray and time dimension."""
+        time_coords = np.array([0, 1])
+        concentration = xr.DataArray(
+            np.array([
+                [0.5, 0.5, 0.5, 0.5],
+                [1.0, 0.0, 1.0, 0.0],
+            ]),
+            dims=["time", "npoints"],
+            coords={"time": time_coords},
+            name="siconc",
+        )
+        area = np.array([1e6, 1e6, 1e6, 1e6])
+        lat = np.array([45.0, 60.0, -45.0, -60.0])
+
+        result = ice_area_nh(concentration, area, lat, as_xarray=True)
+
+        assert isinstance(result, xr.DataArray)
+        assert result.dims == ("time",)
+        np.testing.assert_array_equal(result.coords["time"].values, time_coords)
+        assert result.name == "siconc"
+        assert result[0] == pytest.approx(1e6)
+        assert result[1] == pytest.approx(1e6)

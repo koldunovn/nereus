@@ -28,12 +28,65 @@ if TYPE_CHECKING:
     import xarray as xr
 
 
+def _wrap_as_xarray(
+    result: float | NDArray,
+    source_data: NDArray | "xr.DataArray",
+    default_name: str,
+) -> "xr.DataArray":
+    """Wrap a reduced result as an xarray DataArray.
+
+    After a spatial reduction (nansum over last axis), the result has
+    the leading dimensions of the input.  This helper preserves those
+    dimension names, coordinates, variable name, and attributes when
+    the input is an xarray DataArray.
+
+    Parameters
+    ----------
+    result : float or ndarray
+        The reduced result (scalar or array with leading dims).
+    source_data : array_like
+        The original input data (used to extract dimension metadata).
+    default_name : str
+        Variable name to use when the input has no name (e.g. numpy).
+    """
+    import xarray as xr
+
+    result_arr = np.atleast_1d(np.asarray(result))
+
+    if hasattr(source_data, "dims"):
+        # Input is xarray – preserve leading dimension info
+        n_leading = result_arr.ndim
+        leading_dim_names = list(source_data.dims[:n_leading])
+        leading_coords = {
+            d: source_data.coords[d]
+            for d in leading_dim_names
+            if d in source_data.coords
+        }
+        var_name = source_data.name or default_name
+        var_attrs = dict(source_data.attrs)
+    else:
+        n_leading = result_arr.ndim
+        leading_dim_names = [f"dim_{i}" for i in range(n_leading)]
+        leading_coords = {}
+        var_name = default_name
+        var_attrs = {}
+
+    return xr.DataArray(
+        result_arr.squeeze() if result_arr.size == 1 else result_arr,
+        dims=leading_dim_names if result_arr.size > 1 else None,
+        coords=leading_coords if result_arr.size > 1 else None,
+        name=var_name,
+        attrs=var_attrs,
+    )
+
+
 def ice_area(
     concentration: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
     *,
     mask: NDArray[np.bool_] | None = None,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute total sea ice area.
 
     Sea ice area is the sum of grid cell areas weighted by ice concentration.
@@ -50,12 +103,16 @@ def ice_area(
         Grid cell areas in m^2.
     mask : array_like, optional
         Boolean mask (True = include). If None, all points are included.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Total sea ice area in m^2. Returns float for 1D numpy input,
-        ndarray for ND numpy input, or dask array if inputs are dask.
+        ndarray for ND numpy input, dask array if inputs are dask,
+        or xr.DataArray if as_xarray=True.
 
     Examples
     --------
@@ -109,7 +166,9 @@ def ice_area(
     result = np.nansum(conc * area_arr, axis=-1)
 
     # Return appropriate type
-    if is_lazy:
+    if as_xarray:
+        return _wrap_as_xarray(result, concentration, "ice_area")
+    elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:
         return float(result)
@@ -123,7 +182,8 @@ def ice_volume(
     concentration: NDArray | "xr.DataArray" | None = None,
     *,
     mask: NDArray[np.bool_] | None = None,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute total sea ice volume.
 
     This function handles two types of thickness definitions:
@@ -159,12 +219,16 @@ def ice_volume(
         None when thickness is "effective thickness" (grid-cell mean).
     mask : array_like, optional
         Boolean mask (True = include).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Total sea ice volume in m^3. Returns a dask array if inputs are
-        dask arrays (call ``.compute()`` to get the result).
+        dask arrays (call ``.compute()`` to get the result), or
+        xr.DataArray if as_xarray=True.
 
     Examples
     --------
@@ -229,7 +293,9 @@ def ice_volume(
         result = np.nansum(thick * area_arr, axis=-1)
 
     # Return appropriate type
-    if is_lazy:
+    if as_xarray:
+        return _wrap_as_xarray(result, thickness, "ice_volume")
+    elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:
         return float(result)
@@ -241,7 +307,9 @@ def ice_area_nh(
     concentration: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
     lat: NDArray[np.floating],
-) -> float | NDArray:
+    *,
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Northern Hemisphere sea ice area.
 
     Convenience function that calls ice_area with a Northern Hemisphere mask.
@@ -254,10 +322,12 @@ def ice_area_nh(
         Grid cell areas in m^2.
     lat : array_like
         Latitude of grid points in degrees.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Northern Hemisphere sea ice area in m^2.
 
     Examples
@@ -269,14 +339,16 @@ def ice_area_nh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_area(concentration, area, mask=lat_arr > 0)
+    return ice_area(concentration, area, mask=lat_arr > 0, as_xarray=as_xarray)
 
 
 def ice_area_sh(
     concentration: NDArray | "xr.DataArray",
     area: NDArray[np.floating],
     lat: NDArray[np.floating],
-) -> float | NDArray:
+    *,
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Southern Hemisphere sea ice area.
 
     Convenience function that calls ice_area with a Southern Hemisphere mask.
@@ -289,10 +361,12 @@ def ice_area_sh(
         Grid cell areas in m^2.
     lat : array_like
         Latitude of grid points in degrees.
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Southern Hemisphere sea ice area in m^2.
 
     Examples
@@ -304,7 +378,7 @@ def ice_area_sh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_area(concentration, area, mask=lat_arr < 0)
+    return ice_area(concentration, area, mask=lat_arr < 0, as_xarray=as_xarray)
 
 
 def ice_extent(
@@ -313,7 +387,8 @@ def ice_extent(
     *,
     threshold: float = 0.15,
     mask: NDArray[np.bool_] | None = None,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute sea ice extent.
 
     Sea ice extent is the total area of grid cells where ice concentration
@@ -333,12 +408,16 @@ def ice_extent(
         Concentration threshold (default 0.15 = 15%).
     mask : array_like, optional
         Boolean mask (True = include).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray with dimension
+        names and coordinates preserved from the input (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Total sea ice extent in m^2. Returns a dask array if inputs are
-        dask arrays (call ``.compute()`` to get the result).
+        dask arrays (call ``.compute()`` to get the result), or
+        xr.DataArray if as_xarray=True.
 
     Examples
     --------
@@ -386,7 +465,9 @@ def ice_extent(
     result = np.nansum(area_arr * ice_mask, axis=-1)
 
     # Return appropriate type
-    if is_lazy:
+    if as_xarray:
+        return _wrap_as_xarray(result, concentration, "ice_extent")
+    elif is_lazy:
         return result  # Keep lazy, user calls .compute()
     elif np.ndim(result) == 0:
         return float(result)
@@ -399,7 +480,9 @@ def ice_volume_nh(
     area: NDArray[np.floating],
     lat: NDArray[np.floating],
     concentration: NDArray | "xr.DataArray" | None = None,
-) -> float | NDArray:
+    *,
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Northern Hemisphere sea ice volume.
 
     Convenience function that calls ice_volume with a Northern Hemisphere mask.
@@ -415,10 +498,12 @@ def ice_volume_nh(
     concentration : array_like, optional
         Sea ice concentration (fraction, 0-1). Required if thickness
         is "real thickness" (ice-area mean).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Northern Hemisphere sea ice volume in m^3.
 
     Examples
@@ -430,7 +515,9 @@ def ice_volume_nh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_volume(thickness, area, concentration, mask=lat_arr > 0)
+    return ice_volume(
+        thickness, area, concentration, mask=lat_arr > 0, as_xarray=as_xarray
+    )
 
 
 def ice_volume_sh(
@@ -438,7 +525,9 @@ def ice_volume_sh(
     area: NDArray[np.floating],
     lat: NDArray[np.floating],
     concentration: NDArray | "xr.DataArray" | None = None,
-) -> float | NDArray:
+    *,
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Southern Hemisphere sea ice volume.
 
     Convenience function that calls ice_volume with a Southern Hemisphere mask.
@@ -454,10 +543,12 @@ def ice_volume_sh(
     concentration : array_like, optional
         Sea ice concentration (fraction, 0-1). Required if thickness
         is "real thickness" (ice-area mean).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Southern Hemisphere sea ice volume in m^3.
 
     Examples
@@ -469,7 +560,9 @@ def ice_volume_sh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_volume(thickness, area, concentration, mask=lat_arr < 0)
+    return ice_volume(
+        thickness, area, concentration, mask=lat_arr < 0, as_xarray=as_xarray
+    )
 
 
 def ice_extent_nh(
@@ -478,7 +571,8 @@ def ice_extent_nh(
     lat: NDArray[np.floating],
     *,
     threshold: float = 0.15,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Northern Hemisphere sea ice extent.
 
     Convenience function that calls ice_extent with a Northern Hemisphere mask.
@@ -493,10 +587,12 @@ def ice_extent_nh(
         Latitude of grid points in degrees.
     threshold : float
         Concentration threshold (default 0.15 = 15%).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Northern Hemisphere sea ice extent in m^2.
 
     Examples
@@ -508,7 +604,10 @@ def ice_extent_nh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_extent(concentration, area, threshold=threshold, mask=lat_arr > 0)
+    return ice_extent(
+        concentration, area, threshold=threshold, mask=lat_arr > 0,
+        as_xarray=as_xarray,
+    )
 
 
 def ice_extent_sh(
@@ -517,7 +616,8 @@ def ice_extent_sh(
     lat: NDArray[np.floating],
     *,
     threshold: float = 0.15,
-) -> float | NDArray:
+    as_xarray: bool = False,
+) -> float | NDArray | "xr.DataArray":
     """Compute Southern Hemisphere sea ice extent.
 
     Convenience function that calls ice_extent with a Southern Hemisphere mask.
@@ -532,10 +632,12 @@ def ice_extent_sh(
         Latitude of grid points in degrees.
     threshold : float
         Concentration threshold (default 0.15 = 15%).
+    as_xarray : bool
+        If True, return the result as an xarray DataArray (default False).
 
     Returns
     -------
-    float or ndarray or dask.array
+    float or ndarray or dask.array or xr.DataArray
         Southern Hemisphere sea ice extent in m^2.
 
     Examples
@@ -547,4 +649,7 @@ def ice_extent_sh(
         lat_arr = lat_arr.ravel()
     else:
         lat_arr = np.asarray(lat_arr).ravel()
-    return ice_extent(concentration, area, threshold=threshold, mask=lat_arr < 0)
+    return ice_extent(
+        concentration, area, threshold=threshold, mask=lat_arr < 0,
+        as_xarray=as_xarray,
+    )

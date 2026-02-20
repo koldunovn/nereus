@@ -103,6 +103,31 @@ For the common case of computing ice metrics for Northern or Southern Hemisphere
 These functions automatically create the hemisphere mask from latitude, saving you
 from having to define ``mask=lat > 0`` or ``mask=lat < 0`` each time.
 
+xarray Output
+~~~~~~~~~~~~~
+
+All sea ice diagnostic functions support ``as_xarray=True`` to return the
+result as an :class:`xarray.DataArray` instead of a plain float or numpy array:
+
+.. code-block:: python
+
+   # Scalar result as DataArray
+   area = nr.ice_area(concentration, cell_area, as_xarray=True)
+   print(type(area))   # <class 'xarray.core.dataarray.DataArray'>
+
+   # Time series — leading dimensions and coordinates are preserved
+   area_ts = nr.ice_area_nh(ds.siconc, cell_area, lat, as_xarray=True)
+   print(area_ts.dims)   # ('time',)
+   print(area_ts.name)   # 'siconc' (from input DataArray)
+
+When the input is an :class:`xarray.DataArray`, leading dimension names,
+coordinate values, the variable name, and attributes are all copied to the
+output. For plain numpy input, auto-generated names (``dim_0``, ``dim_1``, …)
+are used for leading axes.
+
+This works with all nine functions: ``ice_area``, ``ice_volume``,
+``ice_extent``, and their ``_nh`` / ``_sh`` hemisphere variants.
+
 Regional Analysis
 ~~~~~~~~~~~~~~~~~
 

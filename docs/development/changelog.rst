@@ -9,7 +9,13 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
-None.
+Added
+~~~~~
+
+- ``as_xarray`` option for all sea ice diagnostic functions (``ice_area``,
+  ``ice_volume``, ``ice_extent``, and their ``_nh`` / ``_sh`` variants) to
+  return results as ``xr.DataArray`` with preserved dimension names,
+  coordinates, and attributes from the input.
 
 [0.3.0] - 2026-02-04
 ------------------

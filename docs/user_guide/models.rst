@@ -87,6 +87,9 @@ Supported Models
    * - ``nr.ifs_tco``
      - IFS TCO
      - Fully implemented
+   * - ``nr.mitgcm``
+     - MITgcm
+     - Fully implemented
    * - ``nr.icono``
      - ICON-Ocean
      - Planned
@@ -354,6 +357,66 @@ Loading a NEMO Mesh
    # Original 2D shape is stored in attributes
    print(f"Original shape: {mesh.attrs['nlon']} x {mesh.attrs['nlat']}")
 
+MITgcm
+------
+
+MITgcm (MIT General Circulation Model) uses a custom binary format (MDS: ``.meta`` + ``.data`` file pairs).
+Nereus reads these natively without requiring the ``xmitgcm`` package.
+
+Loading a MITgcm Mesh
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import nereus as nr
+
+   # Load mesh from directory containing grid files (XC, YC, RAC, etc.)
+   mesh = nr.mitgcm.load_mesh("/path/to/run/")
+
+   # Coordinates are flattened from 2D to 1D
+   print(mesh.sizes["npoints"])  # Total grid points
+
+   # Original 2D shape is stored in attributes
+   print(f"Original shape: {mesh.attrs['ny']} x {mesh.attrs['nx']}")
+
+   # Depth levels and layer thickness (if RC.data/DRF.data exist)
+   print(mesh["depth"].values)
+   print(mesh["layer_thickness"].values)
+
+   # Use corner-point grid instead of cell centers
+   mesh_g = nr.mitgcm.load_mesh("/path/to/run/", grid_type="G")
+
+Loading MITgcm Diagnostic Data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # Load 2D diagnostics with time coordinate
+   ds = nr.mitgcm.open_dataset(
+       "/path/to/run/",
+       prefix="diags2D",
+       delta_t=3600,           # model timestep in seconds
+       ref_date="1710-1-1",    # reference date for time axis
+       mesh=mesh,              # attach lon/lat/depth coordinates
+   )
+
+   # Load multiple diagnostic prefixes at once
+   ds = nr.mitgcm.open_dataset(
+       "/path/to/run/",
+       prefix=["diags2D", "diags3D"],
+       delta_t=3600,
+       ref_date="1710-1-1",
+       mesh=mesh,
+   )
+
+   # Load specific iterations only
+   ds = nr.mitgcm.open_dataset(
+       "/path/to/run/",
+       prefix="diags3D",
+       iters=[8760, 17520],
+       delta_t=3600,
+   )
+
 IFS TCO
 -------
 
@@ -387,6 +450,9 @@ The ``nr.load_mesh()`` function auto-detects mesh type:
 
    # Auto-detect NEMO mesh
    mesh = nr.load_mesh("/path/to/mesh_mask.nc")
+
+   # Auto-detect MITgcm mesh
+   mesh = nr.load_mesh("/path/to/mitgcm/run/")
 
    # Explicit type
    mesh = nr.load_mesh("/path/to/mesh/", mesh_type="fesom")

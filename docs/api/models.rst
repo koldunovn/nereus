@@ -146,6 +146,10 @@ The MITgcm mesh loader expects a directory containing grid files (``XC.data``,
 ``YC.data``, optionally ``RAC.data``, ``RC.data``, ``DRF.data``, ``Depth.data``).
 2D coordinates are flattened to 1D for compatibility with nereus functions.
 
+Use ``mask_land=True`` to load land/ocean masks from ``hFacC.data`` (3D per-level)
+or ``Depth.data`` (2D fallback). The mesh will then contain ``land_mask`` (boolean)
+and ``hFacC`` (float with partial cell fractions).
+
 MITgcm Data Loading
 ~~~~~~~~~~~~~~~~~~~~
 

@@ -25,6 +25,7 @@ def open_dataset(
     delta_t: float = 1.0,
     ref_date: str | None = None,
     mesh: xr.Dataset | None = None,
+    mask_land: bool = False,
 ) -> xr.Dataset:
     """Load MITgcm diagnostic output as an xarray Dataset.
 
@@ -45,6 +46,11 @@ def open_dataset(
     mesh : xr.Dataset, optional
         Nereus mesh dataset. If provided, attaches ``lon``, ``lat``
         (and ``depth`` if available) as coordinates.
+    mask_land : bool
+        If True, replace land-point values with NaN. Uses ``hFacC``
+        from mesh (3D per-level masking) or ``land_mask`` (2D surface
+        masking). Requires ``mesh`` loaded with ``mask_land=True``.
+        If mesh has no mask variables, this option is silently ignored.
 
     Returns
     -------
@@ -144,5 +150,24 @@ def open_dataset(
             coords["depth"] = (("depth_level",), mesh["depth"].values)
 
     ds = xr.Dataset(data_vars, coords=coords)
+
+    # Apply land masking
+    if mask_land and mesh is not None:
+        if "hFacC" in mesh:
+            # 3D masking: hFacC has shape (depth_level, npoints)
+            hfac = mesh["hFacC"].values
+            land_3d = hfac == 0  # True where land
+            for name in list(ds.data_vars):
+                if ds[name].dims == ("time", "depth_level", "npoints"):
+                    ds[name] = ds[name].where(~land_3d)
+                elif ds[name].dims == ("time", "npoints"):
+                    # Use surface mask for 2D fields
+                    ds[name] = ds[name].where(~land_3d[0])
+        elif "land_mask" in mesh:
+            # 2D-only masking
+            land_2d = mesh["land_mask"].values  # True where land
+            for name in list(ds.data_vars):
+                if ds[name].dims[-1] == "npoints":
+                    ds[name] = ds[name].where(~land_2d)
 
     return ds

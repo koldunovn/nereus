@@ -99,6 +99,21 @@ def _make_rc_meta(nz):
     )
 
 
+def _make_hfac_meta(nx, ny, nz):
+    """Return meta text for hFacC (3D partial cell fraction) file."""
+    return (
+        f" nDims = [   3 ];\n"
+        f" dimList = [\n"
+        f"   {nx},    1,   {nx},\n"
+        f"   {ny},    1,   {ny},\n"
+        f"   {nz},    1,   {nz}\n"
+        f" ];\n"
+        f" dataprec = [ 'float32' ];\n"
+        f" nrecords = [     1 ];\n"
+        f" timeStepNumber = [     0 ];\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -132,12 +147,27 @@ def grid_dir(tmp_path):
     _write_meta(tmp_path / "DRF.meta", _make_rc_meta(NZ))
     _write_data(tmp_path / "DRF.data", drf)
 
-    # Depth - bathymetry
+    # Depth - bathymetry (column 0 is land = 0)
     bathy = np.full((NY, NX), 100.0, dtype=np.float32)
+    bathy[:, 0] = 0.0  # first column is land
     _write_meta(tmp_path / "Depth.meta", _make_grid_meta(NX, NY))
     _write_data(tmp_path / "Depth.data", bathy)
 
     return tmp_path
+
+
+@pytest.fixture
+def grid_dir_with_hfac(grid_dir):
+    """Add hFacC to the grid directory. Column 0 is land at all levels,
+    column 1 is ocean at surface but land below level 2."""
+    hfac = np.ones((NZ, NY, NX), dtype=np.float32)
+    hfac[:, :, 0] = 0.0           # column 0: full land
+    hfac[2:, :, 1] = 0.0          # column 1: ocean levels 0-1, land below
+    hfac[1, :, 1] = 0.5           # column 1, level 1: partial cell
+
+    _write_meta(grid_dir / "hFacC.meta", _make_hfac_meta(NX, NY, NZ))
+    _write_data(grid_dir / "hFacC.data", hfac)
+    return grid_dir
 
 
 @pytest.fixture
@@ -307,7 +337,10 @@ class TestLoadMesh:
     def test_mesh_bathymetry(self, grid_dir):
         mesh = load_mesh(grid_dir)
         assert "bathymetry" in mesh
-        np.testing.assert_allclose(mesh["bathymetry"].values, 100.0)
+        # Column 0 is land (Depth=0), rest is ocean (Depth=100)
+        bathy = mesh["bathymetry"].values
+        assert bathy[0] == 0.0
+        assert bathy[1] == 100.0
 
     def test_mesh_metadata(self, grid_dir):
         mesh = load_mesh(grid_dir)
@@ -458,3 +491,116 @@ class TestAutoDetection:
     def test_load_mesh_explicit(self, grid_dir):
         mesh = nr.load_mesh(grid_dir, mesh_type="mitgcm")
         assert mesh.attrs["nereus_mesh_type"] == "mitgcm"
+
+
+# ---------------------------------------------------------------------------
+# Tests: land masking
+# ---------------------------------------------------------------------------
+
+class TestLandMaskWithHfac:
+    """Tests for land masking using hFacC."""
+
+    def test_mask_land_false_by_default(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac)
+        assert "land_mask" not in mesh
+        assert "hFacC" not in mesh
+
+    def test_mask_land_loads_hfac(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        assert "land_mask" in mesh
+        assert "hFacC" in mesh
+
+    def test_land_mask_shape(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        assert mesh["land_mask"].shape == (NX * NY,)
+        assert mesh["hFacC"].shape == (NZ, NX * NY)
+
+    def test_land_mask_values(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        land = mesh["land_mask"].values
+        # Column 0 (indices 0, 4, 8 in flattened 3x4) is land
+        assert land[0] is np.True_
+        assert land[NX] is np.True_
+        # Column 1 is ocean at surface
+        assert land[1] is np.False_
+
+    def test_hfac_partial_cells(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        hfac = mesh["hFacC"].values
+        # Column 1, level 1 should be 0.5 (partial cell)
+        assert hfac[1, 1] == pytest.approx(0.5)
+        # Column 1, levels 2+ should be 0 (land below)
+        assert hfac[2, 1] == 0.0
+
+    def test_land_mask_source_attr(self, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        assert mesh["land_mask"].attrs["source"] == "hFacC"
+
+
+class TestLandMaskDepthFallback:
+    """Tests for land masking falling back to Depth when hFacC is absent."""
+
+    def test_fallback_to_depth(self, grid_dir):
+        """grid_dir has Depth but no hFacC."""
+        mesh = load_mesh(grid_dir, mask_land=True)
+        assert "land_mask" in mesh
+        assert "hFacC" not in mesh
+        assert mesh["land_mask"].attrs["source"] == "Depth"
+
+    def test_depth_mask_values(self, grid_dir):
+        mesh = load_mesh(grid_dir, mask_land=True)
+        land = mesh["land_mask"].values
+        # Column 0 has Depth==0 (land), others have Depth==100
+        assert land[0] is np.True_
+        assert land[1] is np.False_
+
+    def test_no_mask_files(self, tmp_path):
+        """No hFacC, no Depth => mask_land silently does nothing."""
+        lon_2d = np.array([[0, 10], [0, 10]], dtype=np.float32)
+        lat_2d = np.array([[0, 0], [10, 10]], dtype=np.float32)
+
+        _write_meta(tmp_path / "XC.meta", _make_grid_meta(2, 2))
+        _write_data(tmp_path / "XC.data", lon_2d)
+        _write_meta(tmp_path / "YC.meta", _make_grid_meta(2, 2))
+        _write_data(tmp_path / "YC.data", lat_2d)
+
+        mesh = load_mesh(tmp_path, mask_land=True)
+        assert "land_mask" not in mesh
+
+
+class TestDataMasking:
+    """Tests for mask_land in open_dataset."""
+
+    def test_mask_land_2d(self, diag_dir, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        ds = open_dataset(diag_dir, prefix="diags2D", mesh=mesh, mask_land=True)
+        vals = ds["ETAN"].isel(time=0).values
+        # Column 0 is land => NaN
+        assert np.isnan(vals[0])
+        # Column 1 is ocean at surface => not NaN
+        assert not np.isnan(vals[1])
+
+    def test_mask_land_3d(self, diag_dir, grid_dir_with_hfac):
+        mesh = load_mesh(grid_dir_with_hfac, mask_land=True)
+        ds = open_dataset(diag_dir, prefix="diags3D", mesh=mesh, mask_land=True)
+        vals = ds["THETA"].isel(time=0).values
+        # Column 0 is full land at all levels
+        assert np.isnan(vals[0, 0])
+        assert np.isnan(vals[2, 0])
+        # Column 1, level 0: ocean
+        assert not np.isnan(vals[0, 1])
+        # Column 1, level 2: land (hFac==0 below level 1)
+        assert np.isnan(vals[2, 1])
+
+    def test_mask_land_false_no_change(self, diag_dir):
+        mesh = load_mesh(diag_dir)
+        ds = open_dataset(diag_dir, prefix="diags2D", mesh=mesh, mask_land=False)
+        # No NaN from masking (only from missingValue replacement)
+        vals = ds["ETAN"].isel(time=0).values
+        assert not np.any(np.isnan(vals))
+
+    def test_mask_land_without_mesh_ignored(self, diag_dir):
+        ds = open_dataset(diag_dir, prefix="diags2D", mask_land=True)
+        # Should work without error, no masking applied
+        vals = ds["ETAN"].isel(time=0).values
+        assert not np.any(np.isnan(vals))

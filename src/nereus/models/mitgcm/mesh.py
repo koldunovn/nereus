@@ -27,6 +27,7 @@ def load_mesh(
     *,
     grid_type: str = "C",
     use_dask: bool | None = None,
+    mask_land: bool = False,
 ) -> xr.Dataset:
     """Load MITgcm mesh from a directory of MDS grid files.
 
@@ -40,18 +41,26 @@ def load_mesh(
         - ``"G"``: Cell corners (reads ``XG``/``YG``).
     use_dask : bool, optional
         Whether to use dask arrays. Auto-detects if None.
+    mask_land : bool
+        If True, derive land/ocean masks from ``hFacC.data`` (3D,
+        per-level) or fall back to ``Depth.data > 0`` (2D surface only).
+        The masks are stored as ``land_mask`` (2D boolean, ``npoints``)
+        and ``hFacC`` (3D float, ``depth_level × npoints``) if available.
+        Default is False to preserve raw data access.
 
     Returns
     -------
     xr.Dataset
         Mesh dataset with ``lon``, ``lat``, ``area`` on ``npoints`` dimension.
         Optionally includes ``depth``, ``layer_thickness``, ``bathymetry``.
+        When ``mask_land=True``, also includes ``land_mask`` and ``hFacC``.
         Attributes include ``nx``, ``ny``, ``original_shape``.
 
     Examples
     --------
     >>> mesh = nr.mitgcm.load_mesh("/path/to/run/")
-    >>> print(mesh)
+    >>> mesh_masked = nr.mitgcm.load_mesh("/path/to/run/", mask_land=True)
+    >>> # Use mask to filter data: ds["THETA"].where(~mesh["land_mask"])
     """
     path = Path(path)
 
@@ -164,6 +173,58 @@ def load_mesh(
                 "positive": "down",
             },
         )
+
+    # Land/ocean masking
+    if mask_land:
+        if (path / "hFacC.meta").exists():
+            _, hfac_3d = read_mds(path / "hFacC")
+            hfac_3d = hfac_3d.astype(np.float64)
+            nz = hfac_3d.shape[0]
+
+            # 2D surface mask: True = land
+            land_mask = hfac_3d[0].ravel() == 0
+
+            # 3D hFacC flattened to (depth_level, npoints)
+            hfac_flat = hfac_3d.reshape(nz, -1)
+
+            ds["land_mask"] = xr.DataArray(
+                land_mask,
+                dims=("npoints",),
+                attrs={
+                    "long_name": "Land mask (True = land)",
+                    "source": "hFacC",
+                },
+            )
+            ds["hFacC"] = xr.DataArray(
+                hfac_flat,
+                dims=("depth_level", "npoints"),
+                attrs={
+                    "long_name": "Fraction of open cell at tracer point",
+                    "source": "hFacC.data",
+                    "comment": "0 = land, 1 = fully open ocean, "
+                               "between 0 and 1 = partial cell",
+                },
+            )
+        elif (path / "Depth.meta").exists():
+            # Fallback: derive 2D mask from bathymetry
+            if "bathymetry" not in ds:
+                _, bathy = read_mds(path / "Depth")
+                bathy_vals = bathy.ravel().astype(np.float64)
+            else:
+                bathy_vals = ds["bathymetry"].values
+
+            land_mask = bathy_vals == 0
+
+            ds["land_mask"] = xr.DataArray(
+                land_mask,
+                dims=("npoints",),
+                attrs={
+                    "long_name": "Land mask (True = land)",
+                    "source": "Depth",
+                    "comment": "Derived from Depth == 0; "
+                               "2D only, no per-level masking",
+                },
+            )
 
     return add_mesh_metadata(ds, "mitgcm", path, use_dask=use_dask_actual)
 

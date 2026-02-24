@@ -417,6 +417,36 @@ Loading MITgcm Diagnostic Data
        delta_t=3600,
    )
 
+Land Masking
+~~~~~~~~~~~~
+
+By default, MITgcm land points are filled with zeros. Use ``mask_land=True``
+to replace them with NaN. The mask is derived from ``hFacC.data`` (3D per-level,
+preferred) or ``Depth.data > 0`` (2D fallback when hFacC is absent).
+
+.. code-block:: python
+
+   # Load mesh with land mask (reads hFacC.data)
+   mesh = nr.mitgcm.load_mesh("/path/to/run/", mask_land=True)
+
+   # mesh now contains:
+   # - land_mask: boolean (npoints,), True = land
+   # - hFacC: float (depth_level, npoints), 0=land, 1=ocean, partial cells in between
+   print(f"Ocean points: {(~mesh['land_mask'].values).sum()}")
+
+   # Load data with automatic land masking (zeros → NaN)
+   ds = nr.mitgcm.open_dataset(
+       "/path/to/run/",
+       prefix="diags3D",
+       delta_t=3600,
+       mesh=mesh,
+       mask_land=True,  # uses hFacC for 3D per-level masking
+   )
+
+   # Or apply the mask manually to any variable
+   ds["THETA"].where(~mesh["land_mask"])          # 2D surface mask
+   ds["THETA"].where(mesh["hFacC"] > 0)           # 3D per-level mask
+
 IFS TCO
 -------
 

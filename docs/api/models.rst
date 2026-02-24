@@ -127,6 +127,37 @@ The NEMO mesh loader expects a ``mesh_mask.nc`` file and flattens 2D coordinates
 to 1D for compatibility with nereus functions. Original 2D shape information is
 preserved in mesh attributes.
 
+MITgcm
+------
+
+MITgcm (MIT General Circulation Model) reads native MDS binary files (``.meta`` + ``.data``).
+
+.. automodule:: nereus.models.mitgcm
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+MITgcm Mesh Loading
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.mitgcm.load_mesh
+
+The MITgcm mesh loader expects a directory containing grid files (``XC.data``,
+``YC.data``, optionally ``RAC.data``, ``RC.data``, ``DRF.data``, ``Depth.data``).
+2D coordinates are flattened to 1D for compatibility with nereus functions.
+
+Use ``mask_land=True`` to load land/ocean masks from ``hFacC.data`` (3D per-level)
+or ``Depth.data`` (2D fallback). The mesh will then contain ``land_mask`` (boolean)
+and ``hFacC`` (float with partial cell fractions).
+
+MITgcm Data Loading
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.mitgcm.open_dataset
+
+Reads MDS diagnostic output and produces ``xr.Dataset`` with proper variable names,
+time coordinates, and spatial dimensions matching the nereus mesh convention.
+
 IFS TCO
 -------
 

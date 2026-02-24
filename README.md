@@ -98,10 +98,11 @@ nr.transect(
 |------------|--------|
 | FESOM2 | ✅ Full support |
 | IFS TCO | ✅ Full support |
-| HEALPix | 🔧 In development |
+| HEALPix | ✅ Full support |
+| MITgcm | ✅ Full support |
+| NEMO   | ✅ Full support |
 | ICON-O | 📋 Planned |
 | ICON-A | 📋 Planned |
-| NEMO   | 📋 Planned |
 
 
 ## Documentation

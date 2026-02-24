@@ -6,6 +6,7 @@ Available submodules:
 - fesom: FESOM2 ocean model support
 - healpix: HEALPix grid support
 - mitgcm: MITgcm ocean model support
+- mpas: MPAS-Ocean model support
 - nemo: NEMO ocean model support
 - icono: ICON-Ocean model support (stub)
 - icona: ICON-Atmosphere model support (stub)
@@ -24,6 +25,7 @@ Examples
 >>> mesh = nr.healpix.load_mesh(3145728)
 >>> mesh = nr.nemo.load_mesh("/path/to/mesh_mask.nc")
 >>> mesh = nr.mitgcm.load_mesh("/path/to/run/")
+>>> mesh = nr.mpas.load_mesh("/path/to/mpas_output.nc")
 
 # Universal loader with auto-detection
 >>> mesh = nr.load_mesh("/path/to/mesh")
@@ -35,7 +37,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from nereus.models import fesom, healpix, icona, icono, ifs, ifs_tco, mitgcm, nemo
+from nereus.models import fesom, healpix, icona, icono, ifs, ifs_tco, mitgcm, mpas, nemo
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -52,7 +54,7 @@ def detect_mesh_type(path: str | os.PathLike) -> str:
     Returns
     -------
     str
-        Detected mesh type: "fesom", "mitgcm", "nemo", or "unknown".
+        Detected mesh type: "fesom", "mitgcm", "mpas", "nemo", or "unknown".
 
     Notes
     -----
@@ -90,6 +92,9 @@ def detect_mesh_type(path: str | os.PathLike) -> str:
                 import xarray as xr
 
                 with xr.open_dataset(path) as ds:
+                    # MPAS indicators
+                    if "lonCell" in ds and "latCell" in ds and "areaCell" in ds:
+                        return "mpas"
                     # FESOM indicators
                     if "face_nodes" in ds or "nod_area" in ds:
                         return "fesom"
@@ -105,7 +110,7 @@ def detect_mesh_type(path: str | os.PathLike) -> str:
 def load_mesh(
     path: str | os.PathLike | int,
     *,
-    mesh_type: Literal["fesom", "healpix", "mitgcm", "nemo", "ifs_tco", "auto"] | None = None,
+    mesh_type: Literal["fesom", "healpix", "mitgcm", "mpas", "nemo", "ifs_tco", "auto"] | None = None,
     use_dask: bool | None = None,
     **kwargs,
 ) -> "xr.Dataset":
@@ -163,6 +168,8 @@ def load_mesh(
         return fesom.load_mesh(path, use_dask=use_dask, **kwargs)
     elif mesh_type == "mitgcm":
         return mitgcm.load_mesh(path, use_dask=use_dask, **kwargs)
+    elif mesh_type == "mpas":
+        return mpas.load_mesh(path, use_dask=use_dask, **kwargs)
     elif mesh_type == "nemo":
         return nemo.load_mesh(path, use_dask=use_dask, **kwargs)
     elif mesh_type == "ifs_tco":
@@ -183,5 +190,6 @@ __all__ = [
     "ifs_tco",
     "load_mesh",
     "mitgcm",
+    "mpas",
     "nemo",
 ]

@@ -90,6 +90,9 @@ Supported Models
    * - ``nr.mitgcm``
      - MITgcm
      - Fully implemented
+   * - ``nr.mpas``
+     - MPAS-Ocean
+     - Fully implemented
    * - ``nr.icono``
      - ICON-Ocean
      - Planned
@@ -447,6 +450,52 @@ preferred) or ``Depth.data > 0`` (2D fallback when hFacC is absent).
    ds["THETA"].where(~mesh["land_mask"])          # 2D surface mask
    ds["THETA"].where(mesh["hFacC"] > 0)           # 3D per-level mask
 
+MPAS-Ocean
+----------
+
+MPAS-Ocean (Model for Prediction Across Scales) uses an unstructured Voronoi mesh.
+All data and mesh information are stored in standard NetCDF files — mesh variables
+(coordinates, areas, connectivity) are embedded directly in every output file.
+
+Loading an MPAS-Ocean Mesh
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import nereus as nr
+
+   # Load mesh from any MPAS-Ocean NetCDF file
+   mesh = nr.mpas.load_mesh("/path/to/mpas_output.nc")
+
+   # Mesh info
+   print(mesh.sizes["npoints"])           # Number of cells
+   print(mesh["depth"].values)            # Layer center depths
+   print(mesh["layer_thickness"].values)  # Layer thicknesses
+   print(mesh["bathymetry"].values)       # Bottom depth per cell
+   print(mesh["maxLevelCell"].values)     # Deepest active level per cell
+
+Since MPAS embeds mesh information in every output file, any MPAS-Ocean
+NetCDF file can serve as the mesh source. Coordinates are automatically
+converted from radians to degrees and normalized to [-180, 180].
+
+Opening MPAS-Ocean Data
+~~~~~~~~~~~~~~~~~~~~~~~
+
+MPAS data is standard NetCDF, so ``open_dataset`` simply opens the file
+and attaches mesh coordinates:
+
+.. code-block:: python
+
+   # Open with a pre-loaded mesh
+   ds = nr.mpas.open_dataset("/path/to/output.nc", mesh=mesh)
+
+   # Or let it load the mesh from the data file itself
+   ds = nr.mpas.open_dataset("/path/to/output.nc")
+
+   # Access data with coordinates
+   sst = ds["temperature"].isel(Time=0, nVertLevels=0)
+   print(ds.coords)  # lon, lat, depth attached
+
 IFS TCO
 -------
 
@@ -483,6 +532,9 @@ The ``nr.load_mesh()`` function auto-detects mesh type:
 
    # Auto-detect MITgcm mesh
    mesh = nr.load_mesh("/path/to/mitgcm/run/")
+
+   # Auto-detect MPAS mesh
+   mesh = nr.load_mesh("/path/to/mpas_output.nc")
 
    # Explicit type
    mesh = nr.load_mesh("/path/to/mesh/", mesh_type="fesom")

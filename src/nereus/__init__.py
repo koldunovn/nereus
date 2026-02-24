@@ -94,7 +94,7 @@ from nereus.core.spatial import (
 )
 
 # Model-specific modules (as namespaces)
-from nereus.models import fesom, healpix, icona, icono, ifs, ifs_tco, mitgcm, nemo
+from nereus.models import fesom, healpix, icona, icono, ifs, ifs_tco, mitgcm, mpas, nemo
 
 # Universal mesh loader
 from nereus.models import load_mesh
@@ -144,6 +144,7 @@ __all__ = [
     "fesom",
     "healpix",
     "mitgcm",
+    "mpas",
     "nemo",
     "icono",
     "icona",

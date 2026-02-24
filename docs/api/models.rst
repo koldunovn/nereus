@@ -158,6 +158,35 @@ MITgcm Data Loading
 Reads MDS diagnostic output and produces ``xr.Dataset`` with proper variable names,
 time coordinates, and spatial dimensions matching the nereus mesh convention.
 
+MPAS-Ocean
+----------
+
+MPAS-Ocean (Model for Prediction Across Scales) uses an unstructured Voronoi mesh
+stored in standard NetCDF files.
+
+.. automodule:: nereus.models.mpas
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+MPAS-Ocean Mesh Loading
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.mpas.load_mesh
+
+The MPAS-Ocean mesh loader reads any MPAS-Ocean NetCDF file, since mesh variables
+(``lonCell``, ``latCell``, ``areaCell``, etc.) are embedded in every output file.
+Coordinates are converted from radians to degrees and normalized to [-180, 180].
+
+MPAS-Ocean Data Loading
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: nereus.models.mpas.open_dataset
+
+Opens an MPAS-Ocean NetCDF file and attaches mesh coordinates (``lon``, ``lat``,
+``depth``) from the mesh dataset. If no mesh is provided, it is loaded from the
+data file itself.
+
 IFS TCO
 -------
 

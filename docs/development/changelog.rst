@@ -9,8 +9,21 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
+[0.4.0] - 2026-02-27
+---------------------
+
 Added
 ~~~~~
+
+**New model support**
+
+- **MITgcm**: Native MDS binary I/O (``.meta`` + ``.data`` file pairs) without
+  external dependencies. Includes ``load_mesh``, ``open_dataset``, and optional
+  land masking via ``hFacC`` (3D per-level) or ``Depth`` (2D fallback).
+- **MPAS-Ocean**: Mesh loading from standard NetCDF files with automatic
+  coordinate conversion (radians to degrees) and ``open_dataset`` support.
+
+**Diagnostics**
 
 - ``as_xarray`` option for all diagnostic functions to return results as
   ``xr.DataArray`` with preserved dimension names, coordinates, and
@@ -22,6 +35,32 @@ Added
     (both ``"total"`` and ``"map"`` modes)
   - Hovmoller: ``hovmoller`` (returns DataArray with time + depth/latitude
     coordinates instead of a 3-tuple)
+
+**Regridding**
+
+- ``as_xarray`` option for ``nr.regrid`` to return results as ``xr.DataArray``.
+
+**Core**
+
+- ``flatten_spatial`` utility for shared ``(..., nlat, nlon) -> (..., npoints)``
+  reshape logic, used by regrid, transect, and hovmoller.
+- ``mesh_from_arrays`` now handles 1D lon/lat arrays of different sizes
+  (e.g., ``lon(360)`` and ``lat(173)``) by expanding via meshgrid, with
+  proper spherical cell area calculation.
+
+Changed
+~~~~~~~
+
+- ``load_mesh`` auto-detection now supports MITgcm and MPAS-Ocean meshes.
+
+Fixed
+~~~~~
+
+- ``plot_hovmoller`` y-axis artefact with non-linear scales: now computes
+  explicit cell edges clamped to 0 at the surface instead of relying on
+  ``pcolormesh(shading="nearest")``.
+- ``hovmoller`` failing on 4D regular-grid input (e.g., EN4) by
+  auto-flattening the spatial dimensions in both depth and latitude modes.
 
 [0.3.0] - 2026-02-04
 ------------------

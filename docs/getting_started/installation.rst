@@ -87,7 +87,7 @@ To verify that Nereus is installed correctly, run:
    import nereus as nr
    print(nr.__version__)
 
-You should see the version number printed (e.g., ``0.3.0``).
+You should see the version number printed (e.g., ``0.4.0``).
 
 Cartopy Installation Notes
 --------------------------

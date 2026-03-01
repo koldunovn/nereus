@@ -778,3 +778,39 @@ class TestCubicInterpolation:
         result = interp(data)
 
         assert result.shape == (n_levels,) + interp.target_lon.shape
+
+
+class TestNaNSourceData:
+    """Tests for interpolation with NaN values in source data (e.g. land masking)."""
+
+    def _make_en4_like_data(self):
+        """Create EN4-like regular grid data with ~30% NaN (land)."""
+        lon_1d = np.arange(0.5, 360, 1.0)
+        lat_1d = np.arange(-89.5, 90, 1.0)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+        rng = np.random.default_rng(42)
+        data[rng.random(len(data)) < 0.3] = np.nan
+        return lon, lat, data
+
+    def test_cubic_with_nan_source(self):
+        """Cubic interpolation should produce valid output despite NaN in source."""
+        lon, lat, data = self._make_en4_like_data()
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="cubic",
+        )
+        result = interp(data)
+        valid = np.isfinite(result)
+        assert valid.sum() > 0.5 * result.size
+
+    def test_cubic_nan_values_in_range(self):
+        """Cubic with NaN source should not produce wild overshoots."""
+        lon, lat, data = self._make_en4_like_data()
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="cubic",
+        )
+        result = interp(data)
+        valid = result[np.isfinite(result)]
+        assert np.abs(valid).max() < 2.0

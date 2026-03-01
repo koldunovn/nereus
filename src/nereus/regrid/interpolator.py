@@ -111,6 +111,9 @@ class RegridInterpolator:
     valid_mask: NDArray[np.bool_] = field(init=False, repr=False)
     _tree: cKDTree = field(init=False, repr=False)
     _delaunay: Any = field(init=False, repr=False, default=None)
+    _source_2d: NDArray[np.floating] | None = field(
+        init=False, repr=False, default=None
+    )
     _idw_weights: NDArray[np.floating] | None = field(
         init=False, repr=False, default=None
     )
@@ -197,8 +200,8 @@ class RegridInterpolator:
             lon_center = (self.lon_bounds[0] + self.lon_bounds[1]) / 2
             source_lon_norm = _normalize_lon(self.source_lon, lon_center)
 
-            source_2d = np.column_stack([source_lon_norm, self.source_lat])
-            self._delaunay = Delaunay(source_2d)
+            self._source_2d = np.column_stack([source_lon_norm, self.source_lat])
+            self._delaunay = Delaunay(self._source_2d)
 
     def __call__(
         self,
@@ -287,9 +290,17 @@ class RegridInterpolator:
         elif self.method == "cubic":
             from scipy.interpolate import CloughTocher2DInterpolator
 
-            interp = CloughTocher2DInterpolator(
-                self._delaunay, data, fill_value=fill_value
-            )
+            valid_src = np.isfinite(data)
+            if valid_src.all():
+                interp = CloughTocher2DInterpolator(
+                    self._delaunay, data, fill_value=fill_value
+                )
+            else:
+                interp = CloughTocher2DInterpolator(
+                    self._source_2d[valid_src],
+                    data[valid_src],
+                    fill_value=fill_value,
+                )
             target_2d = np.column_stack(
                 [self.target_lon.ravel(), self.target_lat.ravel()]
             )

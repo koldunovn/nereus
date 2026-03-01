@@ -598,3 +598,183 @@ class TestLinearInterpolation:
         interp.method = "invalid"
         with pytest.raises(ValueError, match="Unknown method"):
             interp(synthetic_data)
+
+
+class TestIDWInterpolation:
+    """Tests for IDW (inverse distance weighting) interpolation method."""
+
+    def test_idw_basic(self):
+        """Test basic IDW interpolation produces valid output."""
+        lon_1d = np.linspace(-10, 10, 20)
+        lat_1d = np.linspace(-10, 10, 20)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="idw",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == interp.target_lon.shape
+        assert np.isfinite(result[interp.valid_mask]).all()
+
+    def test_idw_smoother_than_nearest(self):
+        """IDW should produce more unique values than nearest neighbor."""
+        lon_1d = np.linspace(-10, 10, 10)
+        lat_1d = np.linspace(-10, 10, 10)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp_nn = RegridInterpolator(
+            lon, lat, resolution=1.0, method="nearest",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        interp_idw = RegridInterpolator(
+            lon, lat, resolution=1.0, method="idw",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+
+        result_nn = interp_nn(data)
+        result_idw = interp_idw(data)
+
+        valid_nn = result_nn[interp_nn.valid_mask]
+        valid_idw = result_idw[interp_idw.valid_mask]
+
+        if len(valid_nn) > 0 and len(valid_idw) > 0:
+            assert len(np.unique(valid_idw)) >= len(np.unique(valid_nn))
+
+    def test_idw_exact_at_source(self):
+        """IDW should reproduce values close to source at nearby locations."""
+        # Dense source grid so IDW has good coverage
+        lon_1d = np.linspace(-10, 10, 21)
+        lat_1d = np.linspace(-10, 10, 21)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = 2.0 * lon + 3.0 * lat
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="idw",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        result = interp(data)
+
+        # IDW should approximate the linear field reasonably well
+        expected = 2.0 * interp.target_lon + 3.0 * interp.target_lat
+        valid = interp.valid_mask & np.isfinite(result)
+        np.testing.assert_allclose(result[valid], expected[valid], atol=2.0)
+
+    def test_idw_multidim(self):
+        """Test IDW interpolation with multi-dimensional data."""
+        lon_1d = np.linspace(-10, 10, 15)
+        lat_1d = np.linspace(-10, 10, 15)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        n_levels = 3
+        data = np.random.default_rng(42).random((n_levels, len(lon)))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="idw",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == (n_levels,) + interp.target_lon.shape
+
+
+class TestCubicInterpolation:
+    """Tests for cubic (Clough-Tocher) interpolation method."""
+
+    def test_cubic_basic(self):
+        """Test basic cubic interpolation produces valid output."""
+        lon_1d = np.linspace(-10, 10, 20)
+        lat_1d = np.linspace(-10, 10, 20)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="cubic",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == interp.target_lon.shape
+        assert np.isfinite(result).any()
+
+    def test_cubic_smoother_than_linear(self):
+        """Cubic interpolation should produce at least as many unique values as linear."""
+        lon_1d = np.linspace(-10, 10, 10)
+        lat_1d = np.linspace(-10, 10, 10)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp_lin = RegridInterpolator(
+            lon, lat, resolution=1.0, method="linear",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        interp_cub = RegridInterpolator(
+            lon, lat, resolution=1.0, method="cubic",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+
+        result_lin = interp_lin(data)
+        result_cub = interp_cub(data)
+
+        valid_lin = result_lin[np.isfinite(result_lin)]
+        valid_cub = result_cub[np.isfinite(result_cub)]
+
+        if len(valid_lin) > 0 and len(valid_cub) > 0:
+            assert len(np.unique(valid_cub)) >= len(np.unique(valid_lin))
+
+    def test_cubic_exact_for_linear_field(self):
+        """Cubic interpolation reproduces a linear field exactly."""
+        lon_1d = np.linspace(-10, 10, 21)
+        lat_1d = np.linspace(-10, 10, 21)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = 2.0 * lon + 3.0 * lat
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="cubic",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        result = interp(data)
+
+        expected = 2.0 * interp.target_lon + 3.0 * interp.target_lat
+        valid = np.isfinite(result)
+        np.testing.assert_allclose(result[valid], expected[valid], atol=0.1)
+
+    def test_cubic_multidim(self):
+        """Test cubic interpolation with multi-dimensional data."""
+        lon_1d = np.linspace(-10, 10, 15)
+        lat_1d = np.linspace(-10, 10, 15)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        n_levels = 3
+        data = np.random.default_rng(42).random((n_levels, len(lon)))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="cubic",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == (n_levels,) + interp.target_lon.shape

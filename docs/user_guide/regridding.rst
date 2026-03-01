@@ -150,7 +150,7 @@ For plain numpy input with leading dimensions, auto-generated names
 Interpolation Methods
 ---------------------
 
-Nereus supports two interpolation methods:
+Nereus supports four interpolation methods:
 
 **Nearest neighbor** (default):
 
@@ -162,6 +162,16 @@ Uses KDTree lookup in 3D Cartesian space. Fast and preserves original data
 values, but produces blocky patterns when the source grid is much coarser
 than the target.
 
+**IDW** (Inverse Distance Weighting):
+
+.. code-block:: python
+
+   regridded, _ = nr.regrid(data, lon, lat, method="idw")
+
+Uses the 8 nearest neighbors weighted by inverse squared distance.
+Fast like nearest neighbor but produces smooth results. Weights are
+pre-computed so repeated application is very efficient.
+
 **Linear** (Delaunay-based):
 
 .. code-block:: python
@@ -172,10 +182,21 @@ Builds a Delaunay triangulation of the source points and interpolates
 using barycentric coordinates. Produces smooth results. Points outside the
 convex hull of source data are automatically masked with ``fill_value``.
 
+**Cubic** (Clough-Tocher C1):
+
+.. code-block:: python
+
+   regridded, _ = nr.regrid(data, lon, lat, method="cubic")
+
+Uses Clough-Tocher piecewise cubic interpolation on the Delaunay
+triangulation. Produces the smoothest results with C1 continuity
+(continuous first derivatives). Like linear, points outside the convex
+hull are masked.
+
 .. note::
 
-   Linear interpolation is slower than nearest neighbor because a new
-   ``LinearNDInterpolator`` is created for each data field. It is best
+   Linear and cubic interpolation are slower than nearest/IDW because a
+   new interpolator object is created for each data field. They are best
    suited for visualization and exploration rather than bulk processing
    of many time steps.
 
@@ -187,7 +208,7 @@ When to choose which method:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 40 40
+   :widths: 15 40 45
 
    * - Method
      - Best for
@@ -195,9 +216,15 @@ When to choose which method:
    * - ``"nearest"``
      - Fast exploration, high-res source data
      - Blocky patterns with coarse source data
+   * - ``"idw"``
+     - Fast smooth results, general purpose
+     - Less accurate than triangulation-based methods
    * - ``"linear"``
      - Smooth visualization, coarse source data
      - Slower, may create long triangles over land
+   * - ``"cubic"``
+     - Smoothest results, presentation-quality plots
+     - Slowest, may overshoot near sharp gradients
 
 The method parameter is also available in :func:`~nereus.plot`:
 
@@ -285,7 +312,7 @@ For repeated regridding operations on the same mesh, create an interpolator once
    interpolator = nr.RegridInterpolator(
        lon, lat,
        resolution=0.5,
-       method="nearest",         # or "linear"
+       method="nearest",         # or "idw", "linear", "cubic"
        influence_radius=80000.0,
        lon_bounds=(-180, 180),
        lat_bounds=(-90, 90)
@@ -455,9 +482,15 @@ Nereus regridding is optimized for quick exploration:
    * - Nereus (nearest)
      - Speed, simplicity
      - Quick exploration, high-res source data
+   * - Nereus (idw)
+     - Fast smooth output
+     - General-purpose visualization
    * - Nereus (linear)
      - Smooth output, no extra deps
      - Visualization of coarse source data
+   * - Nereus (cubic)
+     - Smoothest output (C1)
+     - Presentation-quality plots
    * - xESMF
      - Conservation, accuracy
      - Production workflows, budget-closing

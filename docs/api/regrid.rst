@@ -36,11 +36,13 @@ Interpolator
       Target grid resolution (degrees or grid dimensions).
 
    .. py:attribute:: method
-      :type: Literal["nearest", "linear"]
+      :type: Literal["nearest", "idw", "linear", "cubic"]
 
       Interpolation method. ``"nearest"`` uses KDTree nearest-neighbor
-      lookup (fast).  ``"linear"`` uses Delaunay triangulation with
-      barycentric interpolation (slower but smoother).
+      lookup (fast).  ``"idw"`` uses inverse distance weighting with 8
+      nearest neighbors (fast, smooth).  ``"linear"`` uses Delaunay
+      triangulation with barycentric interpolation (slower but smoother).
+      ``"cubic"`` uses Clough-Tocher C1 interpolation (smoothest).
 
    .. py:attribute:: influence_radius
       :type: float

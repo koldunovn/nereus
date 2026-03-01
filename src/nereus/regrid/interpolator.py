@@ -51,13 +51,15 @@ class RegridInterpolator:
     resolution : float or tuple of int
         Target grid resolution. If float, specifies degrees per cell.
         If tuple (nlon, nlat), specifies number of grid points.
-    method : {"nearest", "linear"}
+    method : {"nearest", "idw", "linear", "cubic"}
         Interpolation method. "nearest" uses nearest-neighbor lookup via
-        KDTree (fast). "linear" uses Delaunay triangulation with
-        barycentric interpolation (slower but smoother).  Source
-        longitudes are automatically normalized to match the target
-        grid's ``lon_bounds`` so that any input convention (0-360 or
-        -180-180) works transparently.
+        KDTree (fast). "idw" uses inverse distance weighting with 8
+        nearest neighbors (fast, smooth). "linear" uses Delaunay
+        triangulation with barycentric interpolation (slower but
+        smoother). "cubic" uses Clough-Tocher C1 interpolation for the
+        smoothest results.  Source longitudes are automatically
+        normalized to match the target grid's ``lon_bounds`` so that any
+        input convention (0-360 or -180-180) works transparently.
     influence_radius : float
         Maximum influence radius in meters. Points beyond this distance
         from any source point are masked. Default is 80 km.
@@ -96,7 +98,7 @@ class RegridInterpolator:
     source_lon: NDArray[np.floating]
     source_lat: NDArray[np.floating]
     resolution: float | tuple[int, int] = 1.0
-    method: Literal["nearest", "linear"] = "nearest"
+    method: Literal["nearest", "idw", "linear", "cubic"] = "nearest"
     influence_radius: float = 80_000.0
     lon_bounds: tuple[float, float] = (-180.0, 180.0)
     lat_bounds: tuple[float, float] = (-90.0, 90.0)
@@ -109,6 +111,12 @@ class RegridInterpolator:
     valid_mask: NDArray[np.bool_] = field(init=False, repr=False)
     _tree: cKDTree = field(init=False, repr=False)
     _delaunay: Any = field(init=False, repr=False, default=None)
+    _idw_weights: NDArray[np.floating] | None = field(
+        init=False, repr=False, default=None
+    )
+    _idw_indices: NDArray[np.intp] | None = field(
+        init=False, repr=False, default=None
+    )
 
     def __post_init__(self) -> None:
         """Initialize interpolation weights."""
@@ -148,8 +156,40 @@ class RegridInterpolator:
         max_chord = meters_to_chord(self.influence_radius)
         self.valid_mask = self.distances <= max_chord
 
-        # Build Delaunay triangulation for linear interpolation
-        if self.method == "linear":
+        # Pre-compute IDW weights
+        if self.method == "idw":
+            k = 8
+            dists, idxs = self._tree.query(target_xyz, k=k)
+            target_shape = self.target_lon.shape
+            dists = dists.reshape(target_shape + (k,))
+            idxs = idxs.reshape(target_shape + (k,))
+
+            # Inverse distance squared weights
+            # Handle exact matches (distance == 0)
+            exact = dists == 0.0
+            has_exact = exact.any(axis=-1)
+
+            weights = np.zeros_like(dists)
+            # For points with an exact match, set weight=1 for first exact neighbor
+            weights[has_exact] = 0.0
+            first_exact = exact & (np.cumsum(exact, axis=-1) == 1)
+            weights[first_exact] = 1.0
+            # For points without exact match, use 1/d^2
+            with np.errstate(divide="ignore"):
+                inv_d2 = np.where(
+                    ~has_exact[..., np.newaxis], 1.0 / dists**2, weights
+                )
+            weights = np.where(has_exact[..., np.newaxis], weights, inv_d2)
+            # Normalize so weights sum to 1
+            weight_sum = weights.sum(axis=-1, keepdims=True)
+            weight_sum = np.where(weight_sum == 0.0, 1.0, weight_sum)
+            weights = weights / weight_sum
+
+            self._idw_weights = weights
+            self._idw_indices = idxs
+
+        # Build Delaunay triangulation for linear/cubic interpolation
+        if self.method in ("linear", "cubic"):
             from scipy.spatial import Delaunay
 
             # Normalize source longitudes to match the target grid range
@@ -227,10 +267,27 @@ class RegridInterpolator:
             if not np.isnan(fill_value):
                 result = result.astype(np.float64)
             result[~self.valid_mask] = fill_value
+        elif self.method == "idw":
+            result = np.sum(
+                self._idw_weights * data[self._idw_indices], axis=-1
+            )
+            result[~self.valid_mask] = fill_value
         elif self.method == "linear":
             from scipy.interpolate import LinearNDInterpolator
 
             interp = LinearNDInterpolator(
+                self._delaunay, data, fill_value=fill_value
+            )
+            target_2d = np.column_stack(
+                [self.target_lon.ravel(), self.target_lat.ravel()]
+            )
+            result = interp(target_2d).reshape(self.target_lon.shape)
+            # Apply distance-based valid_mask on top
+            result[~self.valid_mask] = fill_value
+        elif self.method == "cubic":
+            from scipy.interpolate import CloughTocher2DInterpolator
+
+            interp = CloughTocher2DInterpolator(
                 self._delaunay, data, fill_value=fill_value
             )
             target_2d = np.column_stack(
@@ -255,7 +312,7 @@ def regrid(
     lon: NDArray[np.floating] | None = None,
     lat: NDArray[np.floating] | None = None,
     resolution: float | tuple[int, int] = 1.0,
-    method: Literal["nearest", "linear"] = "nearest",
+    method: Literal["nearest", "idw", "linear", "cubic"] = "nearest",
     influence_radius: float = 80_000.0,
     fill_value: float = np.nan,
     lon_bounds: tuple[float, float] = (-180.0, 180.0),
@@ -301,10 +358,11 @@ def regrid(
         If None, will attempt to extract from data (xarray only).
     resolution : float or tuple of int
         Target grid resolution.
-    method : {"nearest", "linear"}
+    method : {"nearest", "idw", "linear", "cubic"}
         Interpolation method. "nearest" uses nearest-neighbor lookup.
-        "linear" uses Delaunay triangulation with barycentric interpolation
-        (slower but smoother).
+        "idw" uses inverse distance weighting (fast, smooth). "linear"
+        uses Delaunay triangulation with barycentric interpolation.
+        "cubic" uses Clough-Tocher C1 interpolation (smoothest).
     influence_radius : float
         Maximum influence radius in meters.
     fill_value : float

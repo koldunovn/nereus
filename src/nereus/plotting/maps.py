@@ -40,7 +40,7 @@ def plot(
     extent: tuple[float, float, float, float] | None = None,
     resolution: float | tuple[int, int] = 1.0,
     interpolator: RegridInterpolator | None = None,
-    method: Literal["nearest", "linear"] = "nearest",
+    method: Literal["nearest", "idw", "linear", "cubic"] = "nearest",
     influence_radius: float = 80_000.0,
     cmap: str = "viridis",
     vmin: float | None = None,
@@ -95,10 +95,11 @@ def plot(
         Grid resolution for regridding.
     interpolator : RegridInterpolator, optional
         Pre-computed interpolator. If None, one will be created.
-    method : {"nearest", "linear"}
+    method : {"nearest", "idw", "linear", "cubic"}
         Interpolation method. "nearest" uses nearest-neighbor lookup (fast).
-        "linear" uses Delaunay triangulation with barycentric interpolation
-        (slower but smoother). Default is "nearest".
+        "idw" uses inverse distance weighting (fast, smooth). "linear" uses
+        Delaunay triangulation with barycentric interpolation. "cubic" uses
+        Clough-Tocher C1 interpolation (smoothest). Default is "nearest".
     influence_radius : float
         Maximum influence radius in meters for interpolation. Default is 80 km.
     cmap : str

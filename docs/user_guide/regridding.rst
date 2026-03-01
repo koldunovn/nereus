@@ -147,6 +147,64 @@ automatically, and the variable name and attributes are copied across:
 For plain numpy input with leading dimensions, auto-generated names
 ``dim_0``, ``dim_1``, … are used for those axes.
 
+Interpolation Methods
+---------------------
+
+Nereus supports two interpolation methods:
+
+**Nearest neighbor** (default):
+
+.. code-block:: python
+
+   regridded, _ = nr.regrid(data, lon, lat, method="nearest")
+
+Uses KDTree lookup in 3D Cartesian space. Fast and preserves original data
+values, but produces blocky patterns when the source grid is much coarser
+than the target.
+
+**Linear** (Delaunay-based):
+
+.. code-block:: python
+
+   regridded, _ = nr.regrid(data, lon, lat, method="linear")
+
+Builds a Delaunay triangulation of the source points and interpolates
+using barycentric coordinates. Produces smooth results. Points outside the
+convex hull of source data are automatically masked with ``fill_value``.
+
+.. note::
+
+   Linear interpolation is slower than nearest neighbor because a new
+   ``LinearNDInterpolator`` is created for each data field. It is best
+   suited for visualization and exploration rather than bulk processing
+   of many time steps.
+
+Source longitudes in any convention (0-360, -180-180, or mixed) are
+automatically normalized to match the target grid, so data from models
+like EN4 (0-360) works transparently with the default -180-180 target.
+
+When to choose which method:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Method
+     - Best for
+     - Drawbacks
+   * - ``"nearest"``
+     - Fast exploration, high-res source data
+     - Blocky patterns with coarse source data
+   * - ``"linear"``
+     - Smooth visualization, coarse source data
+     - Slower, may create long triangles over land
+
+The method parameter is also available in :func:`~nereus.plot`:
+
+.. code-block:: python
+
+   fig, ax, _ = nr.plot(data, lon, lat, method="linear")
+
 Resolution Options
 ------------------
 
@@ -223,10 +281,11 @@ For repeated regridding operations on the same mesh, create an interpolator once
 
 .. code-block:: python
 
-   # Create interpolator (slow - builds KD-tree)
+   # Create interpolator (slow - builds KD-tree / Delaunay)
    interpolator = nr.RegridInterpolator(
        lon, lat,
        resolution=0.5,
+       method="nearest",         # or "linear"
        influence_radius=80000.0,
        lon_bounds=(-180, 180),
        lat_bounds=(-90, 90)
@@ -393,9 +452,12 @@ Nereus regridding is optimized for quick exploration:
    * - Tool
      - Strength
      - When to use
-   * - Nereus
+   * - Nereus (nearest)
      - Speed, simplicity
-     - Quick exploration, visualization
+     - Quick exploration, high-res source data
+   * - Nereus (linear)
+     - Smooth output, no extra deps
+     - Visualization of coarse source data
    * - xESMF
      - Conservation, accuracy
      - Production workflows, budget-closing

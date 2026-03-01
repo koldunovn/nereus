@@ -29,18 +29,26 @@ However, they require special handling for visualization and analysis since most
 The Regridding Process
 ----------------------
 
-Nereus converts unstructured data to regular grids using **nearest neighbor interpolation** based on a KD-tree spatial index.
+Nereus converts unstructured data to regular grids using spatial interpolation.
+Two methods are available:
+
+**Nearest neighbor** (default, ``method="nearest"``)
+   For each target grid point, find the nearest source point using a KD-tree
+   built on 3D Cartesian coordinates.  Fast, preserves original values.
+
+**Linear** (``method="linear"``)
+   Build a Delaunay triangulation of source points and interpolate using
+   barycentric coordinates.  Slower, but produces smooth results without
+   the blocky patterns of nearest neighbor.
 
 The process involves:
 
 1. **Coordinate transformation**: Convert lon/lat to 3D Cartesian coordinates on a unit sphere
 2. **KD-tree construction**: Build a spatial index of source points
-3. **Nearest neighbor lookup**: For each target grid point, find the nearest source point
+3. **Interpolation**: Nearest-neighbor lookup or Delaunay-based linear interpolation
 4. **Distance validation**: Mask points that are too far from any source data
 
-.. note::
-
-   Nearest neighbor interpolation is chosen for speed and simplicity. It preserves the original data values without smoothing, making it ideal for quick exploration. More sophisticated interpolation methods (IDW, linear) may be added in future versions.
+Source longitude conventions (0-360 or -180-180) are handled automatically.
 
 The RegridInterpolator
 ----------------------
@@ -52,7 +60,7 @@ The :class:`~nereus.RegridInterpolator` is the core class for regridding:
    interpolator = nr.RegridInterpolator(
        source_lon, source_lat,
        resolution=1.0,           # Target resolution in degrees
-       method="nearest",         # Interpolation method
+       method="nearest",         # "nearest" or "linear"
        influence_radius=80000.0, # Max distance in meters
    )
 
@@ -63,6 +71,10 @@ Key parameters:
 
 **resolution**
    Can be a single number (e.g., ``1.0`` for 1-degree) or a tuple ``(nlon, nlat)`` for explicit grid dimensions.
+
+**method**
+   ``"nearest"`` for fast nearest-neighbor lookup, ``"linear"`` for smooth
+   Delaunay-based interpolation.
 
 **influence_radius**
    Points on the target grid farther than this distance (in meters) from any source point are masked. This prevents extrapolation into data-void regions.

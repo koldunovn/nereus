@@ -9,6 +9,19 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [Unreleased]
 ------------
 
+Added
+~~~~~
+
+**Regridding**
+
+- ``method="linear"`` interpolation option for ``RegridInterpolator``,
+  ``regrid()``, and ``plot()``.  Uses Delaunay triangulation with
+  barycentric interpolation for smooth results without blocky
+  nearest-neighbor patterns.
+- Automatic longitude normalization for linear interpolation: source data
+  in any convention (0-360, -180-180) works transparently with any target
+  grid bounds.
+
 [0.4.0] - 2026-02-27
 ---------------------
 

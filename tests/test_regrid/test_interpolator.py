@@ -398,3 +398,203 @@ class TestInterpolator2DCoords:
         assert interp.source_lon.ndim == 1
         assert interp.source_lat.ndim == 1
         assert interp.source_lon.size == 36 * 18
+
+
+class TestLinearInterpolation:
+    """Tests for linear interpolation method."""
+
+    def test_linear_basic(self):
+        """Test basic linear interpolation."""
+        # Create a regular source grid
+        lon_1d = np.linspace(-10, 10, 20)
+        lat_1d = np.linspace(-10, 10, 20)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="linear",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == interp.target_lon.shape
+        # Should have some valid (finite) values
+        assert np.isfinite(result).any()
+
+    def test_linear_smoother_than_nearest(self):
+        """Linear interpolation should produce smoother results than nearest."""
+        lon_1d = np.linspace(-10, 10, 10)
+        lat_1d = np.linspace(-10, 10, 10)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp_nn = RegridInterpolator(
+            lon, lat, resolution=1.0, method="nearest",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        interp_lin = RegridInterpolator(
+            lon, lat, resolution=1.0, method="linear",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+
+        result_nn = interp_nn(data)
+        result_lin = interp_lin(data)
+
+        # Count unique values — nearest neighbor has fewer unique values
+        # (many target cells map to same source point)
+        valid_nn = result_nn[interp_nn.valid_mask]
+        valid_lin = result_lin[np.isfinite(result_lin)]
+
+        if len(valid_nn) > 0 and len(valid_lin) > 0:
+            assert len(np.unique(valid_lin)) >= len(np.unique(valid_nn))
+
+    def test_linear_nan_outside_hull(self):
+        """Linear interpolation returns NaN outside convex hull of source."""
+        # Small cluster of source points
+        rng = np.random.default_rng(42)
+        lon = rng.uniform(0, 10, 100)
+        lat = rng.uniform(0, 10, 100)
+        data = np.ones(100)
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=5.0, method="linear",
+            influence_radius=5_000_000,  # very large to not interfere
+        )
+        result = interp(data)
+
+        # Points far from data region should be NaN
+        far_mask = (interp.target_lon < -30) | (interp.target_lon > 40)
+        assert np.isnan(result[far_mask]).all()
+
+    def test_linear_exact_for_linear_field(self):
+        """Linear interpolation reproduces a linear field exactly."""
+        # Dense source grid covering the target region
+        lon_1d = np.linspace(-10, 10, 21)
+        lat_1d = np.linspace(-10, 10, 21)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        # Linear field: f(lon, lat) = 2*lon + 3*lat
+        data = 2.0 * lon + 3.0 * lat
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="linear",
+            lon_bounds=(-8, 8), lat_bounds=(-8, 8),
+            influence_radius=500_000,
+        )
+        result = interp(data)
+
+        # At each valid target point, check the linear field is reproduced
+        expected = 2.0 * interp.target_lon + 3.0 * interp.target_lat
+        valid = np.isfinite(result)
+        np.testing.assert_allclose(result[valid], expected[valid], atol=0.1)
+
+    def test_linear_multidim(self):
+        """Test linear interpolation with multi-dimensional data."""
+        lon_1d = np.linspace(-10, 10, 15)
+        lat_1d = np.linspace(-10, 10, 15)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        n_levels = 3
+        data = np.random.default_rng(42).random((n_levels, len(lon)))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="linear",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+        result = interp(data)
+
+        assert result.shape == (n_levels,) + interp.target_lon.shape
+
+    def test_linear_0_360_source_lon(self):
+        """Linear interpolation works when source uses 0-360 and target -180-180."""
+        # Simulate EN4-style data with 0-360 longitude convention
+        lon_1d = np.linspace(0.5, 359.5, 360)
+        lat_1d = np.linspace(-89.5, 89.5, 180)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        # Simple smooth field
+        data = np.sin(np.deg2rad(lat)) * np.cos(np.deg2rad(lon))
+
+        interp = RegridInterpolator(
+            lon, lat, resolution=2.0, method="linear",
+            influence_radius=500_000,
+        )
+        result = interp(data)
+
+        # The entire grid should be covered (no NaN gaps)
+        assert np.isfinite(result[interp.valid_mask]).all()
+        # Most of the domain should be valid
+        assert interp.valid_mask.sum() > 0.9 * interp.valid_mask.size
+
+    def test_linear_0_360_matches_pm180(self):
+        """Linear results should be equivalent regardless of source lon convention."""
+        lat_1d = np.linspace(-85, 85, 18)
+
+        # Source in 0-360
+        lon_0360 = np.linspace(5, 355, 36)
+        lon2d_0360, lat2d_0360 = np.meshgrid(lon_0360, lat_1d)
+        lon_flat_0360 = lon2d_0360.ravel()
+        lat_flat = lat2d_0360.ravel()
+        data = np.sin(np.deg2rad(lat_flat)) * np.cos(np.deg2rad(lon_flat_0360))
+
+        # Source in -180-180 (same physical locations)
+        lon_pm180 = np.where(lon_0360 > 180, lon_0360 - 360, lon_0360)
+        lon2d_pm180, _ = np.meshgrid(lon_pm180, lat_1d)
+        lon_flat_pm180 = lon2d_pm180.ravel()
+        data_pm = np.sin(np.deg2rad(lat_flat)) * np.cos(np.deg2rad(lon_flat_pm180))
+
+        interp_0360 = RegridInterpolator(
+            lon_flat_0360, lat_flat, resolution=10.0, method="linear",
+            lon_bounds=(-180, 180), lat_bounds=(-80, 80),
+            influence_radius=2_000_000,
+        )
+        interp_pm180 = RegridInterpolator(
+            lon_flat_pm180, lat_flat, resolution=10.0, method="linear",
+            lon_bounds=(-180, 180), lat_bounds=(-80, 80),
+            influence_radius=2_000_000,
+        )
+
+        result_0360 = interp_0360(data)
+        result_pm180 = interp_pm180(data_pm)
+
+        # Both should cover the same domain with similar values
+        both_valid = np.isfinite(result_0360) & np.isfinite(result_pm180)
+        assert both_valid.sum() > 0
+        np.testing.assert_allclose(
+            result_0360[both_valid], result_pm180[both_valid], atol=0.1,
+        )
+
+    def test_linear_with_regrid_function(self):
+        """Test linear interpolation through regrid convenience function."""
+        lon_1d = np.linspace(-10, 10, 20)
+        lat_1d = np.linspace(-10, 10, 20)
+        lon_2d, lat_2d = np.meshgrid(lon_1d, lat_1d)
+        lon = lon_2d.ravel()
+        lat = lat_2d.ravel()
+        data = np.sin(np.deg2rad(lat))
+
+        result, interp = regrid(
+            data, lon, lat, resolution=2.0, method="linear",
+            lon_bounds=(-10, 10), lat_bounds=(-10, 10),
+        )
+
+        assert result.shape == interp.target_lon.shape
+        assert interp.method == "linear"
+
+    def test_invalid_method_raises(self, random_mesh_small, synthetic_data):
+        """Test that invalid method raises ValueError."""
+        lon, lat = random_mesh_small
+        interp = RegridInterpolator(lon, lat, resolution=5.0, method="nearest")
+        # Forcibly set invalid method to test runtime error
+        interp.method = "invalid"
+        with pytest.raises(ValueError, match="Unknown method"):
+            interp(synthetic_data)

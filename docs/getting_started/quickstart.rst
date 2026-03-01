@@ -107,6 +107,16 @@ To regrid data from an unstructured mesh to a regular grid:
    # regridded is now a 2D array on a regular lon-lat grid
    print(regridded.shape)  # e.g., (180, 360)
 
+Use ``method="linear"`` for smoother results (Delaunay-based interpolation):
+
+.. code-block:: python
+
+   regridded, interpolator = nr.regrid(
+       data, lon, lat,
+       resolution=1.0,
+       method="linear",
+   )
+
 For repeated operations on the same source grid, reuse the interpolator:
 
 .. code-block:: python

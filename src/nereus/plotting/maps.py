@@ -6,7 +6,7 @@ on various map projections.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -40,6 +40,7 @@ def plot(
     extent: tuple[float, float, float, float] | None = None,
     resolution: float | tuple[int, int] = 1.0,
     interpolator: RegridInterpolator | None = None,
+    method: Literal["nearest", "linear"] = "nearest",
     influence_radius: float = 80_000.0,
     cmap: str = "viridis",
     vmin: float | None = None,
@@ -94,6 +95,10 @@ def plot(
         Grid resolution for regridding.
     interpolator : RegridInterpolator, optional
         Pre-computed interpolator. If None, one will be created.
+    method : {"nearest", "linear"}
+        Interpolation method. "nearest" uses nearest-neighbor lookup (fast).
+        "linear" uses Delaunay triangulation with barycentric interpolation
+        (slower but smoother). Default is "nearest".
     influence_radius : float
         Maximum influence radius in meters for interpolation. Default is 80 km.
     cmap : str
@@ -169,6 +174,7 @@ def plot(
                 lon_arr,
                 lat_arr,
                 resolution=resolution,
+                method=method,
                 influence_radius=influence_radius,
                 lon_bounds=lon_bounds,
                 lat_bounds=lat_bounds,
@@ -178,6 +184,7 @@ def plot(
                 source_lon=lon_arr,
                 source_lat=lat_arr,
                 resolution=resolution,
+                method=method,
                 influence_radius=influence_radius,
                 lon_bounds=lon_bounds,
                 lat_bounds=lat_bounds,

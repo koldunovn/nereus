@@ -36,9 +36,11 @@ Interpolator
       Target grid resolution (degrees or grid dimensions).
 
    .. py:attribute:: method
-      :type: Literal["nearest"]
+      :type: Literal["nearest", "linear"]
 
-      Interpolation method. Currently only "nearest" is supported.
+      Interpolation method. ``"nearest"`` uses KDTree nearest-neighbor
+      lookup (fast).  ``"linear"`` uses Delaunay triangulation with
+      barycentric interpolation (slower but smoother).
 
    .. py:attribute:: influence_radius
       :type: float

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -24,6 +24,14 @@ from nereus.core.grids import (
 
 if TYPE_CHECKING:
     import xarray as xr
+
+
+def _normalize_lon(lon: NDArray[np.floating], center: float) -> NDArray[np.floating]:
+    """Normalize longitudes to a 360-degree range centered on *center*.
+
+    Maps every value into [center - 180, center + 180).
+    """
+    return (lon - (center - 180)) % 360 + (center - 180)
 
 
 @dataclass
@@ -43,8 +51,13 @@ class RegridInterpolator:
     resolution : float or tuple of int
         Target grid resolution. If float, specifies degrees per cell.
         If tuple (nlon, nlat), specifies number of grid points.
-    method : {"nearest"}
-        Interpolation method. Currently only "nearest" is supported.
+    method : {"nearest", "linear"}
+        Interpolation method. "nearest" uses nearest-neighbor lookup via
+        KDTree (fast). "linear" uses Delaunay triangulation with
+        barycentric interpolation (slower but smoother).  Source
+        longitudes are automatically normalized to match the target
+        grid's ``lon_bounds`` so that any input convention (0-360 or
+        -180-180) works transparently.
     influence_radius : float
         Maximum influence radius in meters. Points beyond this distance
         from any source point are masked. Default is 80 km.
@@ -72,12 +85,18 @@ class RegridInterpolator:
     >>> regridded = interpolator(data)
     >>> regridded.shape
     (180, 360)
+
+    Use linear interpolation for smoother results:
+
+    >>> interpolator = RegridInterpolator(
+    ...     mesh_lon, mesh_lat, resolution=1.0, method="linear"
+    ... )
     """
 
     source_lon: NDArray[np.floating]
     source_lat: NDArray[np.floating]
     resolution: float | tuple[int, int] = 1.0
-    method: Literal["nearest"] = "nearest"
+    method: Literal["nearest", "linear"] = "nearest"
     influence_radius: float = 80_000.0
     lon_bounds: tuple[float, float] = (-180.0, 180.0)
     lat_bounds: tuple[float, float] = (-90.0, 90.0)
@@ -89,6 +108,7 @@ class RegridInterpolator:
     distances: NDArray[np.floating] = field(init=False, repr=False)
     valid_mask: NDArray[np.bool_] = field(init=False, repr=False)
     _tree: cKDTree = field(init=False, repr=False)
+    _delaunay: Any = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
         """Initialize interpolation weights."""
@@ -127,6 +147,18 @@ class RegridInterpolator:
         # Create valid mask based on influence radius
         max_chord = meters_to_chord(self.influence_radius)
         self.valid_mask = self.distances <= max_chord
+
+        # Build Delaunay triangulation for linear interpolation
+        if self.method == "linear":
+            from scipy.spatial import Delaunay
+
+            # Normalize source longitudes to match the target grid range
+            # so that e.g. 0-360 source works with -180-180 target.
+            lon_center = (self.lon_bounds[0] + self.lon_bounds[1]) / 2
+            source_lon_norm = _normalize_lon(self.source_lon, lon_center)
+
+            source_2d = np.column_stack([source_lon_norm, self.source_lat])
+            self._delaunay = Delaunay(source_2d)
 
     def __call__(
         self,
@@ -167,7 +199,7 @@ class RegridInterpolator:
         elif data.ndim == 2:
             # 2D case: (extra_dim, npoints)
             n_extra = data.shape[0]
-            result = np.empty((n_extra,) + target_shape, dtype=data.dtype)
+            result = np.empty((n_extra,) + target_shape, dtype=np.float64)
             for i in range(n_extra):
                 result[i] = self._interpolate_1d(data[i], fill_value)
         else:
@@ -175,7 +207,9 @@ class RegridInterpolator:
             leading_shape = data.shape[:-1]
             npoints = data.shape[-1]
             data_flat = data.reshape(-1, npoints)
-            result_flat = np.empty((data_flat.shape[0],) + target_shape, dtype=data.dtype)
+            result_flat = np.empty(
+                (data_flat.shape[0],) + target_shape, dtype=np.float64
+            )
             for i in range(data_flat.shape[0]):
                 result_flat[i] = self._interpolate_1d(data_flat[i], fill_value)
             result = result_flat.reshape(leading_shape + target_shape)
@@ -188,13 +222,25 @@ class RegridInterpolator:
         fill_value: float,
     ) -> NDArray[np.floating]:
         """Interpolate 1D data array."""
-        # Get values at nearest source points
-        result = data[self.indices]
+        if self.method == "nearest":
+            result = data[self.indices]
+            if not np.isnan(fill_value):
+                result = result.astype(np.float64)
+            result[~self.valid_mask] = fill_value
+        elif self.method == "linear":
+            from scipy.interpolate import LinearNDInterpolator
 
-        # Apply mask for points outside influence radius
-        if not np.isnan(fill_value):
-            result = result.astype(np.float64)
-        result[~self.valid_mask] = fill_value
+            interp = LinearNDInterpolator(
+                self._delaunay, data, fill_value=fill_value
+            )
+            target_2d = np.column_stack(
+                [self.target_lon.ravel(), self.target_lat.ravel()]
+            )
+            result = interp(target_2d).reshape(self.target_lon.shape)
+            # Apply distance-based valid_mask on top
+            result[~self.valid_mask] = fill_value
+        else:
+            raise ValueError(f"Unknown method: {self.method!r}")
 
         return result
 
@@ -209,7 +255,7 @@ def regrid(
     lon: NDArray[np.floating] | None = None,
     lat: NDArray[np.floating] | None = None,
     resolution: float | tuple[int, int] = 1.0,
-    method: Literal["nearest"] = "nearest",
+    method: Literal["nearest", "linear"] = "nearest",
     influence_radius: float = 80_000.0,
     fill_value: float = np.nan,
     lon_bounds: tuple[float, float] = (-180.0, 180.0),
@@ -255,8 +301,10 @@ def regrid(
         If None, will attempt to extract from data (xarray only).
     resolution : float or tuple of int
         Target grid resolution.
-    method : {"nearest"}
-        Interpolation method.
+    method : {"nearest", "linear"}
+        Interpolation method. "nearest" uses nearest-neighbor lookup.
+        "linear" uses Delaunay triangulation with barycentric interpolation
+        (slower but smoother).
     influence_radius : float
         Maximum influence radius in meters.
     fill_value : float

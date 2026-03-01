@@ -142,6 +142,10 @@ Advanced Parameters
 **interpolator** : RegridInterpolator, optional
    Pre-computed interpolator to reuse.
 
+**method** : ``"nearest"`` or ``"linear"``, default ``"nearest"``
+   Interpolation method. ``"linear"`` uses Delaunay triangulation for
+   smoother results (slower).
+
 **influence_radius** : float, default 80000.0
    Maximum distance (meters) from data points for interpolation.
 

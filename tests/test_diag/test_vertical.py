@@ -76,6 +76,75 @@ class TestSurfaceMean:
         assert result[0] == pytest.approx(20.0)  # (10+20+30)/3
         assert result[1] == pytest.approx(50.0)  # (40+50+60)/3
 
+    def test_surface_mean_2d_spatial(self):
+        """Test surface mean with 2D spatial dims (nlat, nlon)."""
+        # 3x4 grid
+        data_2d = np.array([
+            [10.0, 20.0, 30.0, 40.0],
+            [50.0, 60.0, 70.0, 80.0],
+            [90.0, 100.0, 110.0, 120.0],
+        ])
+        area = np.ones(12) * 1e6  # 12 = 3*4
+
+        result = surface_mean(data_2d, area)
+
+        # Equal area, so just the mean of all values
+        expected = surface_mean(data_2d.ravel(), area)
+        assert result == pytest.approx(expected)
+
+    def test_surface_mean_2d_spatial_with_time(self):
+        """Test surface mean with (ntime, nlat, nlon) data."""
+        nlat, nlon = 3, 4
+        ntime = 2
+        data = np.arange(ntime * nlat * nlon, dtype=float).reshape(ntime, nlat, nlon)
+        area = np.ones(nlat * nlon) * 1e6
+
+        result = surface_mean(data, area)
+
+        # Should match pre-flattened version
+        expected = surface_mean(data.reshape(ntime, -1), area)
+        assert result.shape == (ntime,)
+        np.testing.assert_allclose(result, expected)
+
+    def test_surface_mean_2d_spatial_varying_area(self):
+        """Test 2D spatial flattening with non-uniform area weights."""
+        data = np.array([
+            [10.0, 20.0],
+            [30.0, 40.0],
+        ])
+        area = np.array([3e6, 1e6, 1e6, 1e6])  # 4 = 2*2
+
+        result = surface_mean(data, area)
+
+        # Should match flattened: [10, 20, 30, 40] with area [3e6, 1e6, 1e6, 1e6]
+        expected = surface_mean(data.ravel(), area)
+        assert result == pytest.approx(expected)
+
+    def test_surface_mean_2d_spatial_with_mask(self):
+        """Test 2D spatial flattening works with mask."""
+        data = np.array([
+            [10.0, 20.0],
+            [30.0, 40.0],
+        ])
+        area = np.ones(4) * 1e6
+        mask = np.array([True, True, False, False])
+
+        result = surface_mean(data, area, mask=mask)
+
+        expected = surface_mean(data.ravel(), area, mask=mask)
+        assert result == pytest.approx(expected)
+
+    def test_surface_mean_2d_spatial_mismatch_raises(self):
+        """Test error when last two dims don't match area size."""
+        data = np.array([
+            [10.0, 20.0, 30.0],
+            [40.0, 50.0, 60.0],
+        ])
+        area = np.ones(10) * 1e6  # 10 != 2*3=6
+
+        with pytest.raises(ValueError, match="don't multiply to"):
+            surface_mean(data, area)
+
     def test_surface_mean_all_masked(self):
         """Test surface mean when all points are masked."""
         data = np.array([10.0, 20.0, 30.0])

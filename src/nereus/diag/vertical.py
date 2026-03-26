@@ -49,7 +49,9 @@ def surface_mean(
     data : array_like
         2D data with shape (npoints,) or higher-dimensional with
         the last axis being npoints. For time series, shape would be
-        (ntime, npoints).
+        (ntime, npoints). Regular-grid data with 2D spatial dimensions
+        (e.g. (nlat, nlon) or (ntime, nlat, nlon)) is automatically
+        flattened when nlat*nlon matches the area size.
     area : array_like
         Grid cell areas in m^2, shape (npoints,).
     mask : array_like, optional
@@ -92,11 +94,24 @@ def surface_mean(
             stacklevel=2,
         )
 
-    # Flatten area
+    # Flatten area to 1D
     if hasattr(area_arr, "ravel"):
         area_arr = area_arr.ravel()
     else:
         area_arr = np.asarray(area_arr).ravel()
+
+    npoints_area = area_arr.shape[0]
+
+    # Flatten 2D spatial dims (e.g. nlat, nlon) into single npoints axis if needed
+    if data_arr.shape[-1] != npoints_area and data_arr.ndim >= 2:
+        if data_arr.shape[-1] * data_arr.shape[-2] == npoints_area:
+            data_arr = data_arr.reshape(data_arr.shape[:-2] + (-1,))
+        else:
+            raise ValueError(
+                f"data last axis has {data_arr.shape[-1]} points but area has "
+                f"{npoints_area}; last two data dims {data_arr.shape[-2:]} "
+                f"also don't multiply to {npoints_area}."
+            )
 
     # Build weights from area, applying mask if provided
     if mask is not None:

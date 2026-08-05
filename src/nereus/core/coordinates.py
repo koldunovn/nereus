@@ -75,6 +75,31 @@ def cartesian_to_lonlat(
     return lon, lat
 
 
+def normalize_longitude(
+    lon: NDArray[np.floating], center: float
+) -> NDArray[np.floating]:
+    """Normalize longitudes to a 360-degree range centered on *center*.
+
+    Maps every value into ``[center - 180, center + 180)``. Useful for
+    keeping a group of coordinates (e.g. a mesh cell's vertices) on a
+    single, dateline-free branch before building a planar polygon from
+    them.
+
+    Parameters
+    ----------
+    lon : array_like
+        Longitude values in degrees.
+    center : float
+        Longitude (degrees) that the output range is centered on.
+
+    Returns
+    -------
+    ndarray
+        Normalized longitude values.
+    """
+    return (lon - (center - 180)) % 360 + (center - 180)
+
+
 def meters_to_chord(meters: float, radius: float = EARTH_RADIUS) -> float:
     """Convert distance in meters to chord distance on unit sphere.
 

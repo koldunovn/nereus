@@ -150,7 +150,7 @@ For plain numpy input with leading dimensions, auto-generated names
 Interpolation Methods
 ---------------------
 
-Nereus supports four interpolation methods:
+Nereus supports five interpolation methods:
 
 **Nearest neighbor** (default):
 
@@ -193,12 +193,30 @@ triangulation. Produces the smoothest results with C1 continuity
 (continuous first derivatives). Like linear, points outside the convex
 hull are masked.
 
+**Conservative** (area-weighted overlap):
+
+.. code-block:: python
+
+   regridded, _ = nr.regrid(data, lon, lat, method="conservative")
+
+Preserves an integrated quantity (e.g. total heat or mass) rather than
+interpolating point values: source and target cell polygons are derived
+from a spherical Voronoi tessellation of the points, and each target
+cell's value is the area-weighted average of every source cell it
+overlaps. See :ref:`conservative-remapping` below for details, including
+how to get the fraction of each target cell actually covered by data and
+how to remap directly onto another unstructured mesh.
+
 .. note::
 
    Linear and cubic interpolation are slower than nearest/IDW because a
-   new interpolator object is created for each data field. They are best
-   suited for visualization and exploration rather than bulk processing
-   of many time steps.
+   new interpolator object is created for each data field. Conservative
+   remapping is slower still (it builds a Voronoi tessellation and does
+   polygon-overlap geometry), but its weights are precomputed once, so
+   repeated application via :class:`~nereus.RegridInterpolator` (rather
+   than the ``nr.regrid()`` convenience function) is still efficient. All
+   three are best suited for visualization, exploration, or budget
+   diagnostics rather than the fastest possible bulk processing.
 
 Source longitudes in any convention (0-360, -180-180, or mixed) are
 automatically normalized to match the target grid, so data from models
@@ -225,12 +243,79 @@ When to choose which method:
    * - ``"cubic"``
      - Smoothest results, presentation-quality plots
      - Slowest, may overshoot near sharp gradients
+   * - ``"conservative"``
+     - Budget/flux diagnostics where totals must be preserved
+     - Slowest to build; boundaries are a planar approximation of true geodesics
 
 The method parameter is also available in :func:`~nereus.plot`:
 
 .. code-block:: python
 
    fig, ax, _ = nr.plot(data, lon, lat, method="linear")
+
+.. _conservative-remapping:
+
+Conservative Remapping
+-----------------------
+
+Conservative remapping answers a different question than the other
+methods: instead of "what's the value at this point?" it asks "how much
+of each source cell's area falls inside each target cell?", so that
+``sum(target_value * target_area) ~= sum(source_value * source_area)``.
+This matters for budget-style diagnostics (heat, freshwater, mass) where
+regridding must not create or destroy the quantity being summed.
+
+Source cell polygons (and, for mesh-to-mesh remapping, target cell
+polygons) are derived generically from the point cloud via a spherical
+Voronoi tessellation -- no mesh-specific connectivity is required, so this
+works for FESOM nodes today and for any other unstructured mesh without
+extra code. Overlap areas are computed with `shapely
+<https://shapely.readthedocs.io/>`_ polygon intersection.
+
+.. code-block:: python
+
+   interpolator = nr.RegridInterpolator(
+       mesh_lon, mesh_lat, resolution=1.0, method="conservative"
+   )
+   regridded, valid_fraction = interpolator(data, return_fraction=True)
+
+``valid_fraction`` gives, for every target cell, the fraction of its area
+that was actually covered by valid (non-NaN) overlapping source data
+(similar to ESMF's ``frac_b``). Use it to mask or threshold cells with
+poor coverage:
+
+.. code-block:: python
+
+   regridded[valid_fraction < 0.5] = np.nan
+
+Unlike the other methods, conservative remapping can also target another
+unstructured mesh directly (mesh-to-mesh remapping), by passing
+``target_lon``/``target_lat`` instead of ``resolution``:
+
+.. code-block:: python
+
+   interpolator = nr.RegridInterpolator(
+       fesom_lon, fesom_lat, method="conservative",
+       target_lon=icon_lon, target_lat=icon_lat,
+   )
+   regridded, valid_fraction = interpolator(data, return_fraction=True)
+   # regridded.shape == icon_lon.shape
+
+``target_lon``/``target_lat`` and ``return_fraction=True`` both raise
+``ValueError`` for any method other than ``"conservative"``. The
+``nr.regrid()`` convenience function only supports the regular-grid
+target case; use :class:`~nereus.RegridInterpolator` directly for
+mesh-to-mesh remapping or to retrieve ``valid_fraction``.
+
+.. note::
+
+   Cell boundaries are built and clipped in the lon/lat plane (like the
+   Delaunay triangulation used by ``"linear"``/``"cubic"``), and cell
+   areas use the same chord-based spherical-area approximation as
+   FESOM's mesh-area calculations elsewhere in nereus. This is a good
+   approximation away from the poles but is not exact; ``valid_fraction``
+   is clipped to ``[0, 1]`` to stay interpretable despite the small
+   resulting approximation noise.
 
 Resolution Options
 ------------------
@@ -312,7 +397,7 @@ For repeated regridding operations on the same mesh, create an interpolator once
    interpolator = nr.RegridInterpolator(
        lon, lat,
        resolution=0.5,
-       method="nearest",         # or "idw", "linear", "cubic"
+       method="nearest",         # or "idw", "linear", "cubic", "conservative"
        influence_radius=80000.0,
        lon_bounds=(-180, 180),
        lat_bounds=(-90, 90)

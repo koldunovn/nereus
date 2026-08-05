@@ -36,13 +36,16 @@ Interpolator
       Target grid resolution (degrees or grid dimensions).
 
    .. py:attribute:: method
-      :type: Literal["nearest", "idw", "linear", "cubic"]
+      :type: Literal["nearest", "idw", "linear", "cubic", "conservative"]
 
       Interpolation method. ``"nearest"`` uses KDTree nearest-neighbor
       lookup (fast).  ``"idw"`` uses inverse distance weighting with 8
       nearest neighbors (fast, smooth).  ``"linear"`` uses Delaunay
       triangulation with barycentric interpolation (slower but smoother).
       ``"cubic"`` uses Clough-Tocher C1 interpolation (smoothest).
+      ``"conservative"`` uses area-weighted polygon overlap so an
+      integrated quantity is preserved (slowest); see
+      :ref:`conservative-remapping`.
 
    .. py:attribute:: influence_radius
       :type: float
@@ -60,31 +63,46 @@ Interpolator
       Target grid latitude bounds.
 
    .. py:attribute:: target_lon
-      :type: NDArray
+      :type: NDArray | None
 
-      2D array of target grid longitudes.
+      Longitudes of an arbitrary unstructured target (constructor input,
+      ``method="conservative"`` only), or the resulting target
+      coordinates after ``__post_init__`` -- 2D ``(nlat, nlon)`` for a
+      regular grid, 1D ``(n_target,)`` for an arbitrary target.
 
    .. py:attribute:: target_lat
-      :type: NDArray
+      :type: NDArray | None
 
-      2D array of target grid latitudes.
+      See ``target_lon``.
 
    .. py:attribute:: indices
       :type: NDArray
 
-      Pre-computed source indices for each target point.
+      Pre-computed source indices for each target point. Not set for
+      ``method="conservative"``.
 
    .. py:attribute:: distances
       :type: NDArray
 
-      Pre-computed distances from target to source points.
+      Pre-computed distances from target to source points. Not set for
+      ``method="conservative"``.
 
    .. py:attribute:: valid_mask
       :type: NDArray
 
-      Boolean mask indicating valid target points.
+      Boolean mask indicating valid target points. Not set for
+      ``method="conservative"`` (use ``return_fraction=True`` on
+      ``__call__`` instead).
 
 .. autofunction:: nereus.regrid.interpolator.regrid
+
+Conservative Remapping
+-----------------------
+
+.. automodule:: nereus.regrid.conservative
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Cache
 -----

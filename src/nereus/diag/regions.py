@@ -11,6 +11,9 @@ from importlib import resources
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import Point, shape
+from shapely.ops import unary_union
+from shapely.prepared import prep
 
 
 def load_geojson(name: str) -> dict:
@@ -97,21 +100,9 @@ def get_region_mask(
 
     Raises
     ------
-    ImportError
-        If shapely is not installed.
     ValueError
         If the region is not found in the GeoJSON file.
     """
-    try:
-        from shapely.geometry import Point, shape
-        from shapely.ops import unary_union
-        from shapely.prepared import prep
-    except ImportError:
-        raise ImportError(
-            "shapely is required for region masks. "
-            "Install with: pip install shapely>=2.0"
-        )
-
     geojson = load_geojson(geojson_name)
     geometries = []
     for feature in geojson.get("features", []):

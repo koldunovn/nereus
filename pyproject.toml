@@ -35,6 +35,7 @@ dependencies = [
     "cartopy>=0.21",
     "dask[array]>=2022.6",
     "healpy>=1.16",
+    "shapely>=2.0",
 ]
 
 [project.optional-dependencies]

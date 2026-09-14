@@ -14,10 +14,16 @@ triangulate in that plane) and then measuring the *spherical* area of the
 resulting polygon, so weights remain physically meaningful even though the
 polygon boundaries themselves are a planar approximation of true geodesics.
 
+Points sitting exactly at a pole are a special case: every longitude at
+lat=+-90 maps to the same Cartesian point, so a pole row pulled from a
+regular lat/lon source (e.g. reanalysis data enumerates every longitude at
+lat=90) collapses to duplicate Voronoi generators. These are detected and
+merged before tessellating, then the resulting single pole cell is split
+back into one wedge per original point (see ``build_voronoi_cells``).
+
 Known limitations: cells whose true (geodesic) boundary would enclose a
-pole, or Voronoi cells built from a source point very close to a pole, are
-not handled exactly -- the planar polygon can misrepresent such a cell's
-true shape.
+pole without any source point sitting there are not handled exactly -- the
+planar polygon can misrepresent such a cell's true shape.
 """
 
 from __future__ import annotations
@@ -109,6 +115,119 @@ def geometry_spherical_area(geom: BaseGeometry) -> float:
     return 0.0
 
 
+_POLE_LAT_EPS = 1e-6  # degrees; points this close to +-90 are treated as the pole
+
+
+def _interp_boundary_lat(
+    angle: float, b_angle: NDArray[np.floating], b_lat: NDArray[np.floating]
+) -> float:
+    """Circularly interpolate a Voronoi cell boundary's latitude at `angle`.
+
+    ``b_angle`` must already be sorted ascending within ``[0, 360)``.
+    """
+    n = len(b_angle)
+    j = int(np.searchsorted(b_angle, angle, side="right")) % n
+    j_prev = (j - 1) % n
+    a0, a1 = b_angle[j_prev], b_angle[j]
+    span = (a1 - a0) % 360.0
+    span = 360.0 if span == 0.0 else span
+    t = ((angle - a0) % 360.0) / span
+    return float(b_lat[j_prev] + t * (b_lat[j] - b_lat[j_prev]))
+
+
+def _split_pole_cell(
+    boundary_lon: NDArray[np.floating],
+    boundary_lat: NDArray[np.floating],
+    group_lon: NDArray[np.floating],
+    pole_lat: float,
+) -> list[BaseGeometry]:
+    """Split a pole-enclosing Voronoi cell into one wedge per owning point.
+
+    Used in two situations: (1) multiple points sit exactly at the same
+    pole and so collapsed onto a single Voronoi generator (``group_lon``
+    has more than one entry), or (2) a single point's cell happens to
+    enclose a pole without sitting there itself (``group_lon`` has one
+    entry) -- in the plain (lon, lat) plane, a cell containing a pole
+    cannot be closed into a simple polygon without cutting it along a
+    lat=+-90 edge, which is what this function does. ``group_lon`` records
+    each owning point's own longitude -- a well-defined azimuth around the
+    pole even where the points themselves coincide there (or don't reach
+    it at all). Wedges are cut at the angles midway between each pair of
+    (circularly) consecutive points, so the merged cell's area is
+    partitioned exactly rather than being copied whole to every point.
+
+    Parameters
+    ----------
+    boundary_lon, boundary_lat : array_like
+        Vertices of the pole-enclosing Voronoi cell, in degrees.
+    group_lon : array_like
+        Longitude(s) of the point(s) owning this cell.
+    pole_lat : float
+        The true pole latitude this cell encloses (+90.0 or -90.0).
+
+    Returns
+    -------
+    list of shapely geometry
+        One wedge polygon per group member, in the same order as
+        ``group_lon``.
+    """
+    n_group = len(group_lon)
+
+    b_angle = np.mod(boundary_lon, 360.0)
+    order = np.argsort(b_angle)
+    b_angle = b_angle[order]
+    b_lat = boundary_lat[order]
+
+    g_order = np.argsort(np.mod(group_lon, 360.0))
+    g_angle = np.mod(group_lon, 360.0)[g_order]
+
+    span = np.mod(np.roll(g_angle, -1) - g_angle, 360.0)
+    span = np.where(span == 0.0, 360.0, span)
+    cut_after = np.mod(g_angle + span / 2.0, 360.0)
+    cut_before = np.roll(cut_after, 1)
+
+    sub_polys: list[BaseGeometry] = []
+    for k in range(n_group):
+        lo = float(cut_before[k])
+        rel_span = (float(cut_after[k]) - lo) % 360.0
+        rel_span = 360.0 if rel_span == 0.0 else rel_span
+        hi = lo + rel_span  # unwrapped: hi - lo == rel_span exactly, never 0
+
+        # Boundary points strictly inside this wedge, re-expressed on the
+        # same unwrapped (lo, hi) scale as lo/hi themselves -- this is what
+        # keeps the ring numerically monotonic (no dateline-style wrap)
+        # regardless of how wide the wedge is, including the full-circle
+        # (rel_span == 360) case where a single point owns the whole cap.
+        b_rel = (b_angle - lo) % 360.0
+        inside = (b_rel > 0.0) & (b_rel < rel_span)
+        order_inside = np.argsort(b_rel[inside])
+        arc_lon = lo + b_rel[inside][order_inside]
+        arc_lat = b_lat[inside][order_inside]
+
+        lat_lo = _interp_boundary_lat(lo % 360.0, b_angle, b_lat)
+        lat_hi = _interp_boundary_lat(hi % 360.0, b_angle, b_lat)
+
+        # Ring: down the left radial edge (pole -> boundary at lo), across
+        # the boundary arc, up the right radial edge (boundary at hi ->
+        # pole), then closed by the implicit top edge back from (hi,
+        # pole_lat) to (lo, pole_lat) -- the standard equirectangular
+        # representation of a wedge of a polar cap.
+        ring_lon = np.concatenate([[lo, lo], arc_lon, [hi, hi]])
+        ring_lat = np.concatenate([[pole_lat, lat_lo], arc_lat, [lat_hi, pole_lat]])
+
+        poly = Polygon(np.column_stack([ring_lon, ring_lat]))
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        sub_polys.append(poly)
+
+    # sub_polys is ordered by ascending angle (g_order); map back to each
+    # member's original position within the group.
+    out: list[BaseGeometry] = [sub_polys[0]] * n_group
+    for k, orig_pos in enumerate(g_order):
+        out[orig_pos] = sub_polys[k]
+    return out
+
+
 def build_voronoi_cells(
     lon: NDArray[np.floating], lat: NDArray[np.floating]
 ) -> list[BaseGeometry]:
@@ -120,6 +239,22 @@ def build_voronoi_cells(
     (via :func:`nereus.core.coordinates.normalize_longitude`) so the
     resulting planar polygon doesn't spuriously wrap around the dateline.
 
+    Points sitting at a pole (within ``1e-6`` degrees of lat=+-90) are
+    merged into a single Voronoi generator per pole -- every longitude
+    maps to the same Cartesian point there, so ``SphericalVoronoi`` would
+    otherwise reject them as duplicates. Separately, whichever single
+    generator ends up nearest each pole (which, by the definition of a
+    Voronoi tessellation, is always the one whose cell encloses that
+    pole -- not necessarily one of the merged points above, e.g. for a
+    sparse mesh with no point placed at the pole itself) is also handled
+    specially, since such a cell cannot be closed into a simple polygon in
+    the plain (lon, lat) plane without an explicit cut at lat=+-90. Both
+    cases are handled by splitting/closing the cell via
+    :func:`_split_pole_cell`, so pole-adjacent area is neither dropped
+    (previously: an invalid, self-intersecting planar polygon collapsing
+    to zero area) nor multiply counted (previously: a crash, or -- had it
+    not crashed -- duplicated points each claiming the full merged area).
+
     Parameters
     ----------
     lon, lat : array_like
@@ -129,19 +264,43 @@ def build_voronoi_cells(
     -------
     list of shapely geometry
         One polygon per input point, in the same order. Self-intersecting
-        planar projections (rare, typically near poles) are repaired with
-        ``buffer(0)`` and may become a ``MultiPolygon``.
+        planar projections (rare) are repaired with ``buffer(0)`` and may
+        become a ``MultiPolygon``.
 
     Raises
     ------
     ValueError
         If the spherical Voronoi tessellation fails, e.g. because the
-        points contain exact duplicates.
+        points contain non-pole duplicates or are otherwise degenerate.
     """
     lon = np.asarray(lon, dtype=float)
     lat = np.asarray(lat, dtype=float)
+    n = len(lon)
 
-    xyz = np.column_stack(lonlat_to_cartesian(lon, lat))
+    at_north = lat >= 90.0 - _POLE_LAT_EPS
+    at_south = lat <= -90.0 + _POLE_LAT_EPS
+
+    groups: list[NDArray[np.intp]] = []
+    generator_lon: list[float] = []
+    generator_lat: list[float] = []
+
+    for i in np.nonzero(~(at_north | at_south))[0]:
+        groups.append(np.array([i]))
+        generator_lon.append(float(lon[i]))
+        generator_lat.append(float(lat[i]))
+
+    for pole_mask, fixed_pole_lat in ((at_north, 90.0), (at_south, -90.0)):
+        idx = np.nonzero(pole_mask)[0]
+        if idx.size == 0:
+            continue
+        groups.append(idx)
+        generator_lon.append(0.0)
+        generator_lat.append(fixed_pole_lat)
+
+    generator_lon_arr = np.array(generator_lon)
+    generator_lat_arr = np.array(generator_lat)
+
+    xyz = np.column_stack(lonlat_to_cartesian(generator_lon_arr, generator_lat_arr))
 
     try:
         sv = SphericalVoronoi(xyz, radius=1.0)
@@ -149,21 +308,49 @@ def build_voronoi_cells(
         raise ValueError(
             "Failed to build a spherical Voronoi tessellation from the "
             "source points for conservative remapping. This usually means "
-            "the points contain exact duplicates or are otherwise "
+            "the points contain (non-pole) duplicates or are otherwise "
             f"degenerate (e.g. all coplanar). Original error: {exc}"
         ) from exc
     sv.sort_vertices_of_regions()
 
-    polygons: list[BaseGeometry] = []
-    for i, region in enumerate(sv.regions):
+    # The generator nearest each pole is, by definition, the one whose
+    # Voronoi cell encloses it -- regardless of whether any point sits
+    # exactly at the pole.
+    north_owner = int(np.argmax(xyz[:, 2]))
+    south_owner = int(np.argmin(xyz[:, 2]))
+
+    polygons: list[BaseGeometry | None] = [None] * n
+    for gidx, (g, region) in enumerate(zip(groups, sv.regions, strict=True)):
         verts = sv.vertices[region]
         vlon, vlat = cartesian_to_lonlat(verts[:, 0], verts[:, 1], verts[:, 2])
-        vlon = normalize_longitude(vlon, lon[i])
-        poly = Polygon(np.column_stack([vlon, vlat]))
-        if not poly.is_valid:
-            poly = poly.buffer(0)
-        polygons.append(poly)
 
+        if gidx == north_owner:
+            pole_lat: float | None = 90.0
+        elif gidx == south_owner:
+            pole_lat = -90.0
+        else:
+            pole_lat = None
+
+        if pole_lat is None and g.size == 1:
+            i = g[0]
+            vlon_i = normalize_longitude(vlon, lon[i])
+            poly = Polygon(np.column_stack([vlon_i, vlat]))
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            polygons[i] = poly
+        else:
+            # Either multiple points collapsed onto this generator (an
+            # exact pole duplicate group), or this is the single closest
+            # point to a pole its cell encloses -- both need the cell
+            # split/closed via the pole edge rather than the plain
+            # site-centered construction above.
+            if pole_lat is None:
+                pole_lat = float(lat[g[0]])
+            wedges = _split_pole_cell(vlon, vlat, lon[g], pole_lat)
+            for i, wedge in zip(g, wedges, strict=True):
+                polygons[i] = wedge
+
+    assert all(p is not None for p in polygons)
     return polygons
 
 
